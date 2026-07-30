@@ -1,6 +1,16 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import type { Updateable } from "kysely";
 import { db } from "./db";
-import { routes, tracks, type Route, type Track, type Visibility } from "./db/schema";
+import {
+  routeValues,
+  toJson,
+  toRoute,
+  toTrack,
+  trackValues,
+  type Route,
+  type RoutesTable,
+  type Track,
+  type Visibility,
+} from "./db/schema";
 import { buildTrack } from "./gpx/build";
 import { mergeBounds } from "./gpx/geo";
 import { parseGpx } from "./gpx/parse";
@@ -152,7 +162,7 @@ export async function createRoute(input: CreateRouteInput): Promise<IngestResult
   const routeId = generateId();
   const rollup = rollupRoute(prepared.map((p) => p.built));
 
-  const trackRows = prepared.map((p, index) => ({
+  const trackRows: Track[] = prepared.map((p, index) => ({
     id: generateId(),
     routeId,
     name: p.name,
@@ -171,27 +181,29 @@ export async function createRoute(input: CreateRouteInput): Promise<IngestResult
   }));
 
   const now = new Date();
-  const [route] = db.transaction((tx) => {
-    const inserted = tx
-      .insert(routes)
-      .values({
-        id: routeId,
-        slug: buildSlug(title),
-        title,
-        description: input.description?.trim() || null,
-        visibility: input.visibility,
-        activityType: input.activityType?.trim() || null,
-        bbox: rollup.bbox,
-        startedAt: rollup.startedAt,
-        createdAt: now,
-        updatedAt: now,
-        ...rollup.stats,
-      })
-      .returning()
-      .all();
+  const route = await db.transaction().execute(async (tx) => {
+    const inserted = await tx
+      .insertInto("routes")
+      .values(
+        routeValues({
+          id: routeId,
+          slug: buildSlug(title),
+          title,
+          description: input.description?.trim() || null,
+          visibility: input.visibility,
+          activityType: input.activityType?.trim() || null,
+          bbox: rollup.bbox,
+          startedAt: rollup.startedAt,
+          createdAt: now,
+          updatedAt: now,
+          ...rollup.stats,
+        }),
+      )
+      .returningAll()
+      .executeTakeFirstOrThrow();
 
-    tx.insert(tracks).values(trackRows).run();
-    return inserted;
+    await tx.insertInto("tracks").values(trackRows.map(trackValues)).execute();
+    return toRoute(inserted);
   });
 
   try {
@@ -200,7 +212,7 @@ export async function createRoute(input: CreateRouteInput): Promise<IngestResult
       trackRows.map((row, index) => writeTrackGpx(routeId, row.id, prepared[index].xml)),
     );
   } catch (error) {
-    db.delete(routes).where(eq(routes.id, routeId)).run();
+    await db.deleteFrom("routes").where("id", "=", routeId).execute();
     await deleteRouteBlobs(routeId);
     throw error;
   }
@@ -234,7 +246,7 @@ export async function addTracksToRoute(
   const prepared = prepareTracks(files);
   const startIndex = existing.tracks.length;
 
-  const trackRows = prepared.map((p, index) => ({
+  const trackRows: Track[] = prepared.map((p, index) => ({
     id: generateId(),
     routeId,
     name: p.name,
@@ -252,16 +264,21 @@ export async function addTracksToRoute(
     ...p.built.stats,
   }));
 
-  db.insert(tracks).values(trackRows).run();
+  await db.insertInto("tracks").values(trackRows.map(trackValues)).execute();
 
   try {
     await Promise.all(
       trackRows.map((row, index) => writeTrackGpx(routeId, row.id, prepared[index].xml)),
     );
   } catch (error) {
-    for (const row of trackRows) {
-      db.delete(tracks).where(eq(tracks.id, row.id)).run();
-    }
+    await db
+      .deleteFrom("tracks")
+      .where(
+        "id",
+        "in",
+        trackRows.map((row) => row.id),
+      )
+      .execute();
     throw error;
   }
 
@@ -284,10 +301,13 @@ export async function addTracksToRoute(
  * Called after any change to the track list.
  */
 export async function recomputeRouteAggregates(routeId: string): Promise<void> {
-  const rows = db.select().from(tracks).where(eq(tracks.routeId, routeId)).all();
+  const rows = (
+    await db.selectFrom("tracks").selectAll().where("routeId", "=", routeId).execute()
+  ).map(toTrack);
 
   if (rows.length === 0) {
-    db.update(routes)
+    await db
+      .updateTable("routes")
       .set({
         distanceM: 0,
         elevationGainM: 0,
@@ -300,10 +320,10 @@ export async function recomputeRouteAggregates(routeId: string): Promise<void> {
         maxSpeedMps: null,
         bbox: null,
         startedAt: null,
-        updatedAt: new Date(),
+        updatedAt: Date.now(),
       })
-      .where(eq(routes.id, routeId))
-      .run();
+      .where("id", "=", routeId)
+      .execute();
     return;
   }
 
@@ -313,15 +333,16 @@ export async function recomputeRouteAggregates(routeId: string): Promise<void> {
     .map((r) => r.startedAt?.getTime())
     .filter((t): t is number => t != null);
 
-  db.update(routes)
+  await db
+    .updateTable("routes")
     .set({
       ...stats,
-      bbox: boxes.length > 0 ? mergeBounds(boxes) : null,
-      startedAt: starts.length > 0 ? new Date(Math.min(...starts)) : null,
-      updatedAt: new Date(),
+      bbox: boxes.length > 0 ? toJson(mergeBounds(boxes)) : null,
+      startedAt: starts.length > 0 ? Math.min(...starts) : null,
+      updatedAt: Date.now(),
     })
-    .where(eq(routes.id, routeId))
-    .run();
+    .where("id", "=", routeId)
+    .execute();
 }
 
 export interface UpdateRouteInput {
@@ -336,7 +357,7 @@ export interface UpdateRouteInput {
  * have been shared, and changing it would break every existing link.
  */
 export async function updateRoute(routeId: string, input: UpdateRouteInput): Promise<void> {
-  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  const patch: Updateable<RoutesTable> = { updatedAt: Date.now() };
 
   if (input.title !== undefined) {
     const title = input.title.trim();
@@ -347,59 +368,75 @@ export async function updateRoute(routeId: string, input: UpdateRouteInput): Pro
   if (input.visibility !== undefined) patch.visibility = input.visibility;
   if (input.activityType !== undefined) patch.activityType = input.activityType?.trim() || null;
 
-  db.update(routes).set(patch).where(eq(routes.id, routeId)).run();
+  await db.updateTable("routes").set(patch).where("id", "=", routeId).execute();
 }
 
 export async function deleteRoute(routeId: string): Promise<void> {
   // Tracks and photos cascade via the schema's foreign keys.
-  db.delete(routes).where(eq(routes.id, routeId)).run();
+  await db.deleteFrom("routes").where("id", "=", routeId).execute();
   await deleteRouteBlobs(routeId);
 }
 
 export async function deleteTrack(routeId: string, trackId: string): Promise<void> {
-  db.delete(tracks).where(and(eq(tracks.id, trackId), eq(tracks.routeId, routeId))).run();
+  await db
+    .deleteFrom("tracks")
+    .where("id", "=", trackId)
+    .where("routeId", "=", routeId)
+    .execute();
   await deleteTrackGpx(routeId, trackId);
   await recomputeRouteAggregates(routeId);
 }
 
-function withTracks(route: Route | undefined): RouteWithTracks | null {
+async function withTracks(route: Route | undefined): Promise<RouteWithTracks | null> {
   if (!route) return null;
-  const rows = db
-    .select()
-    .from(tracks)
-    .where(eq(tracks.routeId, route.id))
-    .orderBy(asc(tracks.orderIndex))
-    .all();
-  return { ...route, tracks: rows };
+  const rows = await db
+    .selectFrom("tracks")
+    .selectAll()
+    .where("routeId", "=", route.id)
+    .orderBy("orderIndex asc")
+    .execute();
+  return { ...route, tracks: rows.map(toTrack) };
 }
 
 export async function getRouteBySlug(slug: string): Promise<RouteWithTracks | null> {
-  const route = db.select().from(routes).where(eq(routes.slug, slug)).get();
-  return withTracks(route);
+  const route = await db
+    .selectFrom("routes")
+    .selectAll()
+    .where("slug", "=", slug)
+    .executeTakeFirst();
+  return withTracks(route && toRoute(route));
 }
 
 export async function getRouteById(id: string): Promise<RouteWithTracks | null> {
-  const route = db.select().from(routes).where(eq(routes.id, id)).get();
-  return withTracks(route);
+  const route = await db
+    .selectFrom("routes")
+    .selectAll()
+    .where("id", "=", id)
+    .executeTakeFirst();
+  return withTracks(route && toRoute(route));
 }
 
 /** Homepage gallery: public routes only, newest activity first. */
 export async function listPublicRoutes(): Promise<Route[]> {
-  return db
-    .select()
-    .from(routes)
-    .where(eq(routes.visibility, "public"))
-    .orderBy(desc(routes.startedAt), desc(routes.createdAt))
-    .all();
+  const rows = await db
+    .selectFrom("routes")
+    .selectAll()
+    .where("visibility", "=", "public")
+    .orderBy("startedAt desc")
+    .orderBy("createdAt desc")
+    .execute();
+  return rows.map(toRoute);
 }
 
 /** Admin list: everything, including unlisted routes. */
 export async function listAllRoutes(): Promise<Route[]> {
-  return db
-    .select()
-    .from(routes)
-    .orderBy(desc(routes.startedAt), desc(routes.createdAt))
-    .all();
+  const rows = await db
+    .selectFrom("routes")
+    .selectAll()
+    .orderBy("startedAt desc")
+    .orderBy("createdAt desc")
+    .execute();
+  return rows.map(toRoute);
 }
 
 /** Lightweight geometry for gallery thumbnails, without the full series arrays. */
@@ -409,20 +446,14 @@ export async function listRouteThumbnails(
   const result = new Map<string, Array<{ geometry: string; color: string }>>();
   if (routeIds.length === 0) return result;
 
-  const rows = db
-    .select({
-      routeId: tracks.routeId,
-      geometry: tracks.geometry,
-      color: tracks.color,
-      orderIndex: tracks.orderIndex,
-    })
-    .from(tracks)
-    .orderBy(asc(tracks.orderIndex))
-    .all();
+  const rows = await db
+    .selectFrom("tracks")
+    .select(["routeId", "geometry", "color"])
+    .where("routeId", "in", routeIds)
+    .orderBy("orderIndex asc")
+    .execute();
 
-  const wanted = new Set(routeIds);
   for (const row of rows) {
-    if (!wanted.has(row.routeId)) continue;
     const list = result.get(row.routeId) ?? [];
     list.push({ geometry: row.geometry, color: row.color });
     result.set(row.routeId, list);

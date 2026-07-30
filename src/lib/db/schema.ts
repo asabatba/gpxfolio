@@ -1,92 +1,88 @@
-import { relations, sql } from "drizzle-orm";
-import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import type { Generated, Insertable, Selectable } from "kysely";
+import type { BBox, RouteStats } from "../gpx/types";
 
 /**
- * Stats columns shared by `routes` (aggregate) and `tracks` (per file).
+ * The database schema, in two layers.
+ *
+ * `Database` describes the tables as SQLite actually stores them, which is what
+ * Kysely type-checks queries against. SQLite has no date or JSON type, so
+ * timestamps are epoch-millisecond integers and arrays are JSON text there.
+ *
+ * `Route`/`Track`/`Photo` are what the rest of the app works with: `Date`s and
+ * real arrays. The `to*`/`*Values` functions below are the only place the two
+ * meet, so no caller has to remember which side of the boundary it is on.
+ *
+ * Column names are camelCase here and snake_case in SQL — `CamelCasePlugin`
+ * (see `./index.ts`) rewrites them in both directions. Anything that bypasses
+ * the query builder, migrations included, must use the snake_case names.
+ *
  * Distances/elevations are metres, times seconds, speeds metres per second —
  * unit conversion is a presentation concern, handled in `src/lib/format.ts`.
  */
-const statsColumns = {
-  distanceM: real("distance_m").notNull().default(0),
-  elevationGainM: real("elevation_gain_m").notNull().default(0),
-  elevationLossM: real("elevation_loss_m").notNull().default(0),
-  elevationMinM: real("elevation_min_m"),
-  elevationMaxM: real("elevation_max_m"),
-  durationS: integer("duration_s"),
-  movingTimeS: integer("moving_time_s"),
-  avgSpeedMps: real("avg_speed_mps"),
-  maxSpeedMps: real("max_speed_mps"),
-};
+
+export type Visibility = "public" | "unlisted";
+
+/** Stats columns shared by `routes` (aggregate) and `tracks` (per file). */
+interface StatsColumns {
+  distanceM: Generated<number>;
+  elevationGainM: Generated<number>;
+  elevationLossM: Generated<number>;
+  elevationMinM: number | null;
+  elevationMaxM: number | null;
+  durationS: number | null;
+  movingTimeS: number | null;
+  avgSpeedMps: number | null;
+  maxSpeedMps: number | null;
+}
 
 /** One shareable page. */
-export const routes = sqliteTable(
-  "routes",
-  {
-    id: text("id").primaryKey(),
-    /** Unguessable, URL-safe. Unlisted routes rely on this for privacy. */
-    slug: text("slug").notNull().unique(),
-    title: text("title").notNull(),
-    description: text("description"),
-    /**
-     * `public` routes appear on the homepage gallery; `unlisted` ones are
-     * reachable only by their slug. Both are readable without logging in.
-     */
-    visibility: text("visibility", { enum: ["public", "unlisted"] })
-      .notNull()
-      .default("unlisted"),
-    /** Free-text ("Ride", "Hike"), shown as a badge. */
-    activityType: text("activity_type"),
-    /** `[west, south, east, north]` covering all tracks, as JSON. */
-    bbox: text("bbox", { mode: "json" }).$type<[number, number, number, number]>(),
-    /** Earliest track start, for sorting the gallery chronologically. */
-    startedAt: integer("started_at", { mode: "timestamp_ms" }),
-    createdAt: integer("created_at", { mode: "timestamp_ms" })
-      .notNull()
-      .default(sql`(unixepoch() * 1000)`),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
-      .notNull()
-      .default(sql`(unixepoch() * 1000)`),
-    ...statsColumns,
-  },
-  (table) => [
-    // The gallery query filters on visibility and orders by date.
-    index("routes_visibility_started_idx").on(table.visibility, table.startedAt),
-  ],
-);
+export interface RoutesTable extends StatsColumns {
+  id: string;
+  /** Unguessable, URL-safe. Unlisted routes rely on this for privacy. */
+  slug: string;
+  title: string;
+  description: string | null;
+  /**
+   * `public` routes appear on the homepage gallery; `unlisted` ones are
+   * reachable only by their slug. Both are readable without logging in.
+   */
+  visibility: Generated<Visibility>;
+  /** Free-text ("Ride", "Hike"), shown as a badge. */
+  activityType: string | null;
+  /** JSON `[west, south, east, north]` covering all tracks. */
+  bbox: string | null;
+  /** Earliest track start, for sorting the gallery chronologically. */
+  startedAt: number | null;
+  createdAt: Generated<number>;
+  updatedAt: Generated<number>;
+}
 
 /** One uploaded GPX file within a route. A route may combine several. */
-export const tracks = sqliteTable(
-  "tracks",
-  {
-    id: text("id").primaryKey(),
-    routeId: text("route_id")
-      .notNull()
-      .references(() => routes.id, { onDelete: "cascade" }),
-    name: text("name"),
-    sourceFilename: text("source_filename").notNull(),
-    /** Hex colour for this track's line on the map. */
-    color: text("color").notNull(),
-    orderIndex: integer("order_index").notNull().default(0),
+export interface TracksTable extends StatsColumns {
+  id: string;
+  routeId: string;
+  name: string | null;
+  sourceFilename: string;
+  /** Hex colour for this track's line on the map. */
+  color: string;
+  orderIndex: Generated<number>;
 
-    /** Encoded polyline (precision 5) of the simplified coordinates. */
-    geometry: text("geometry").notNull(),
-    /**
-     * Index-aligned with `geometry`. Stored as JSON arrays rather than a blob:
-     * SQLite compresses poorly either way, and JSON keeps the rows readable and
-     * trivially serialisable to the client.
-     */
-    elevations: text("elevations", { mode: "json" }).$type<number[] | null>(),
-    distances: text("distances", { mode: "json" }).$type<number[]>().notNull(),
-    timeOffsets: text("time_offsets", { mode: "json" }).$type<number[] | null>(),
+  /** Encoded polyline (precision 5) of the simplified coordinates. */
+  geometry: string;
+  /**
+   * Index-aligned with `geometry`. Stored as JSON arrays rather than a blob:
+   * SQLite compresses poorly either way, and JSON keeps the rows readable and
+   * trivially serialisable to the client.
+   */
+  elevations: string | null;
+  distances: string;
+  timeOffsets: string | null;
 
-    pointCountOriginal: integer("point_count_original").notNull(),
-    pointCountStored: integer("point_count_stored").notNull(),
-    bbox: text("bbox", { mode: "json" }).$type<[number, number, number, number]>(),
-    startedAt: integer("started_at", { mode: "timestamp_ms" }),
-    ...statsColumns,
-  },
-  (table) => [index("tracks_route_idx").on(table.routeId, table.orderIndex)],
-);
+  pointCountOriginal: number;
+  pointCountStored: number;
+  bbox: string | null;
+  startedAt: number | null;
+}
 
 /**
  * Photos attached to a route, matched to a position along the track.
@@ -98,50 +94,141 @@ export const tracks = sqliteTable(
  * because a photo may carry its own GPS tags, which take precedence over a
  * time-based match. Nothing reads this table yet.
  */
-export const photos = sqliteTable(
-  "photos",
-  {
-    id: text("id").primaryKey(),
-    routeId: text("route_id")
-      .notNull()
-      .references(() => routes.id, { onDelete: "cascade" }),
-    /** Which track the photo was matched against, when known. */
-    trackId: text("track_id").references(() => tracks.id, { onDelete: "set null" }),
-    filename: text("filename").notNull(),
-    caption: text("caption"),
-    /** EXIF capture time, the key used to place the photo along the track. */
-    takenAt: integer("taken_at", { mode: "timestamp_ms" }),
-    lat: real("lat"),
-    lon: real("lon"),
-    /** Metres from the track start, for placing a marker on the elevation profile. */
-    distanceAlongM: real("distance_along_m"),
-    width: integer("width"),
-    height: integer("height"),
-    orderIndex: integer("order_index").notNull().default(0),
-    createdAt: integer("created_at", { mode: "timestamp_ms" })
-      .notNull()
-      .default(sql`(unixepoch() * 1000)`),
-  },
-  (table) => [index("photos_route_idx").on(table.routeId, table.orderIndex)],
-);
+export interface PhotosTable {
+  id: string;
+  routeId: string;
+  /** Which track the photo was matched against, when known. */
+  trackId: string | null;
+  filename: string;
+  caption: string | null;
+  /** EXIF capture time, the key used to place the photo along the track. */
+  takenAt: number | null;
+  lat: number | null;
+  lon: number | null;
+  /** Metres from the track start, for placing a marker on the elevation profile. */
+  distanceAlongM: number | null;
+  width: number | null;
+  height: number | null;
+  orderIndex: Generated<number>;
+  createdAt: Generated<number>;
+}
 
-export const routesRelations = relations(routes, ({ many }) => ({
-  tracks: many(tracks),
-  photos: many(photos),
-}));
+export interface Database {
+  routes: RoutesTable;
+  tracks: TracksTable;
+  photos: PhotosTable;
+}
 
-export const tracksRelations = relations(tracks, ({ one }) => ({
-  route: one(routes, { fields: [tracks.routeId], references: [routes.id] }),
-}));
+/* -------------------------------------------------------------------------- */
+/* Domain rows                                                                 */
+/* -------------------------------------------------------------------------- */
 
-export const photosRelations = relations(photos, ({ one }) => ({
-  route: one(routes, { fields: [photos.routeId], references: [routes.id] }),
-  track: one(tracks, { fields: [photos.trackId], references: [tracks.id] }),
-}));
+export interface Route extends RouteStats {
+  id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  visibility: Visibility;
+  activityType: string | null;
+  bbox: BBox | null;
+  startedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
-export type Route = typeof routes.$inferSelect;
-export type NewRoute = typeof routes.$inferInsert;
-export type Track = typeof tracks.$inferSelect;
-export type NewTrack = typeof tracks.$inferInsert;
-export type Photo = typeof photos.$inferSelect;
-export type Visibility = Route["visibility"];
+export interface Track extends RouteStats {
+  id: string;
+  routeId: string;
+  name: string | null;
+  sourceFilename: string;
+  color: string;
+  orderIndex: number;
+  geometry: string;
+  elevations: number[] | null;
+  distances: number[];
+  timeOffsets: number[] | null;
+  pointCountOriginal: number;
+  pointCountStored: number;
+  bbox: BBox | null;
+  startedAt: Date | null;
+}
+
+export interface Photo {
+  id: string;
+  routeId: string;
+  trackId: string | null;
+  filename: string;
+  caption: string | null;
+  takenAt: Date | null;
+  lat: number | null;
+  lon: number | null;
+  distanceAlongM: number | null;
+  width: number | null;
+  height: number | null;
+  orderIndex: number;
+  createdAt: Date;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Conversions                                                                 */
+/* -------------------------------------------------------------------------- */
+
+function parseJson<T>(value: string | null): T | null {
+  return value == null ? null : (JSON.parse(value) as T);
+}
+
+/** JSON for a column that is nullable in SQL, so `null` round-trips as `null`. */
+export function toJson(value: unknown): string | null {
+  return value == null ? null : JSON.stringify(value);
+}
+
+function toEpoch(value: Date | null): number | null {
+  return value == null ? null : value.getTime();
+}
+
+function toDate(value: number | null): Date | null {
+  return value == null ? null : new Date(value);
+}
+
+export function toRoute(row: Selectable<RoutesTable>): Route {
+  return {
+    ...row,
+    bbox: parseJson<BBox>(row.bbox),
+    startedAt: toDate(row.startedAt),
+    createdAt: new Date(row.createdAt),
+    updatedAt: new Date(row.updatedAt),
+  };
+}
+
+export function toTrack(row: Selectable<TracksTable>): Track {
+  return {
+    ...row,
+    elevations: parseJson<number[]>(row.elevations),
+    // `distances` is NOT NULL, so this always parses to an array.
+    distances: JSON.parse(row.distances) as number[],
+    timeOffsets: parseJson<number[]>(row.timeOffsets),
+    bbox: parseJson<BBox>(row.bbox),
+    startedAt: toDate(row.startedAt),
+  };
+}
+
+export function routeValues(route: Route): Insertable<RoutesTable> {
+  return {
+    ...route,
+    bbox: toJson(route.bbox),
+    startedAt: toEpoch(route.startedAt),
+    createdAt: route.createdAt.getTime(),
+    updatedAt: route.updatedAt.getTime(),
+  };
+}
+
+export function trackValues(track: Track): Insertable<TracksTable> {
+  return {
+    ...track,
+    elevations: toJson(track.elevations),
+    distances: JSON.stringify(track.distances),
+    timeOffsets: toJson(track.timeOffsets),
+    bbox: toJson(track.bbox),
+    startedAt: toEpoch(track.startedAt),
+  };
+}

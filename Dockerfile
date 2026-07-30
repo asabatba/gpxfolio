@@ -3,23 +3,19 @@
 # gpxfolio — CapRover / plain Docker deployment.
 #
 # Two stages: the builder compiles the SolidStart app with pnpm; the runtime
-# image copies out only `.output/`. Nitro's node-server preset bundles every
-# dependency the server needs directly into `.output/server/node_modules` —
-# including its own copy of better-sqlite3 — so the runtime stage never needs
-# its own node_modules and stays free of the build toolchain below.
+# image copies out `.output/` (the built server), `migrations/` and a
+# production-only node_modules.
 
 FROM node:24-alpine AS builder
 WORKDIR /app
 
-# better-sqlite3 ships prebuilt binaries (including one for linuxmusl-x64,
-# i.e. this exact image), but it has no install/postinstall script of its
-# own — only a binding.gyp. npm/pnpm's implicit rule for that combination is
-# to run `node-gyp rebuild` at install time regardless of whether a usable
-# prebuild already exists, and Alpine's base image has neither Python nor a
-# compiler, so that step fails outright ("Could not find any Python
-# installation") and aborts the whole install. This toolchain is what
-# node-gyp needs to actually succeed; it's discarded with this stage, so it
-# never reaches the runtime image.
+# better-sqlite3 ships prebuilt binaries for several platforms, but has no
+# install/postinstall script of its own — only a binding.gyp — and npm/pnpm's
+# implicit rule for that combination is to run `node-gyp rebuild` at install
+# time regardless of whether a usable prebuild exists. Alpine's base image has
+# neither Python nor a compiler, so that step fails immediately ("Could not
+# find any Python installation") without this toolchain. It's discarded with
+# this stage, so none of it reaches the runtime image.
 RUN apk add --no-cache python3 make g++
 
 # Node 24 ships corepack; enabling it makes `pnpm` resolve to the exact
@@ -32,11 +28,18 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build
 
-# migrate.mjs has no build step of its own. Copying it next to the built
-# server lets it resolve "better-sqlite3" and "drizzle-orm" from
-# .output/server/node_modules at run time, which is why the runtime stage
-# below never has to carry a node_modules of its own.
-RUN cp scripts/migrate.mjs .output/server/migrate.mjs
+# Drops devDependencies (vite, vitest, typescript, tailwind, ...) but keeps
+# everything "dependencies" in package.json needs — better-sqlite3 (with the
+# native binding just compiled above, so it's carried across already built
+# rather than needing the toolchain again) and kysely among them.
+#
+# This full copy is what scripts/migrate.mjs runs against at container start.
+# Nitro's own build only bundles into .output/server/node_modules the exact
+# files it can prove the *compiled server* needs — migrate.mjs is a separate
+# script outside that trace, so what it imports (`kysely/migration`, and the
+# migration files themselves) is invisible to the tracer. A real node_modules
+# sidesteps needing to reason about what Nitro's tracer did or didn't include.
+RUN pnpm prune --prod
 
 # ---------------------------------------------------------------------------
 
@@ -51,7 +54,10 @@ ENV HOST=0.0.0.0
 ENV PORT=80
 
 COPY --from=builder /app/.output ./.output
-COPY --from=builder /app/drizzle ./drizzle
+COPY --from=builder /app/migrations ./migrations
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
 
 # Routes, their GPX blobs, and the SQLite database all live under here (see
 # src/lib/storage.ts). Without a persistent volume mounted at this path,
@@ -69,4 +75,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 # schema change shipped in a new image is applied before the server accepts
 # traffic. `exec` hands PID 1 to node so a SIGTERM on redeploy reaches the
 # server directly instead of being swallowed by the shell.
-CMD ["sh", "-c", "node .output/server/migrate.mjs && exec node .output/server/index.mjs"]
+CMD ["sh", "-c", "node scripts/migrate.mjs && exec node .output/server/index.mjs"]

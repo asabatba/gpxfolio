@@ -18,7 +18,24 @@ file, and an interactive elevation profile linked to the map.
 ## Stack
 
 SolidStart (SSR, Node preset) · TypeScript · Tailwind CSS v4 · MapLibre GL v6 ·
-SQLite via Drizzle ORM · Vitest. Distances are metric throughout.
+SQLite via Kysely · Vitest. Distances are metric throughout.
+
+### Database
+
+`src/lib/db/schema.ts` holds both halves of the schema. The `Database` interface
+describes the tables as SQLite stores them — timestamps as epoch-millisecond
+integers, arrays as JSON text, since SQLite has neither type — and is what
+Kysely type-checks queries against. `Route`, `Track` and `Photo` are what the
+rest of the app sees, with real `Date`s and arrays; the `to*`/`*Values`
+functions in that file are the only place the two meet. Columns are camelCase in
+TypeScript and snake_case in SQL, translated in both directions by Kysely's
+`CamelCasePlugin`, so anything bypassing the query builder — migrations included
+— has to spell out the snake_case names.
+
+Migrations are hand-written in `migrations/`, applied by `pnpm db:migrate`, and
+tracked in a `kysely_migration` table. They're plain JS so the deploy can run
+them with bare `node` and no build step. There's no schema-diffing generator and
+no `db:studio`; any SQLite browser opens `data/gpxfolio.db` directly.
 
 ### Basemap
 
@@ -102,16 +119,32 @@ with no extra config beyond what's below.
 
 **How the image is built.** Two stages: the builder installs `python3 make g++`
 (needed to compile `better-sqlite3`'s native binding — see below), installs with
-pnpm, and runs `pnpm build`; the runtime stage copies out only `.output/` and
-carries none of that toolchain. Nitro's node-server preset bundles every
-dependency the server needs directly into `.output/server/node_modules` —
-including a copy of the now-compiled `better-sqlite3` — so the runtime image
-needs no node_modules of its own. Migrations run via `node
-.output/server/migrate.mjs` (a copy of `scripts/migrate.mjs` placed next to the
-built server at build time, so it can resolve `better-sqlite3` and `drizzle-orm`
-from `.output/server/node_modules` too) on every container start, before the
-server begins accepting traffic — so a schema change shipped in a new image is
-applied automatically on redeploy.
+pnpm, runs `pnpm build`, then `pnpm prune --prod` to drop devDependencies (vite,
+vitest, typescript, tailwind, ...). The runtime stage copies out `.output/` (the
+built server), `migrations/` and that pruned `node_modules` — so migrations run
+via a plain `node scripts/migrate.mjs`, identical to how it already works
+outside Docker.
+
+That last part matters: an earlier version of this Dockerfile tried to avoid
+shipping a runtime `node_modules` at all, on the theory that Nitro's
+node-server preset bundles everything the server needs into
+`.output/server/node_modules` already (true for the *server itself* — verified
+against a real build). But Nitro's bundling is a **trace**: it only copies the
+specific files it can prove are reachable from the compiled server entry point.
+`scripts/migrate.mjs` is a separate script outside that trace, so what *it*
+imports is invisible to the tracer. Back when migrations ran through Drizzle,
+that showed up as `.output/server/node_modules/drizzle-orm/better-sqlite3/`
+containing `driver.js`, `index.js` and `session.js` but not the `migrator.js`
+the script needed, and every container built from that image died on startup
+with `ERR_MODULE_NOT_FOUND` — the gap was baked in at build time, not something
+that only appeared on a later restart. The successful traffic in the deploy log
+that first surfaced this was from CapRover keeping the *previous* deployment
+alive while the new (broken) one failed its startup and never went live — not
+the same container working, then breaking. Nothing about that is specific to
+Drizzle; `kysely/migration` and the `migrations/` files themselves sit outside
+the trace in exactly the same way. A real `node_modules`, produced the ordinary
+way, doesn't have the gap: `kysely` and `better-sqlite3` are both direct
+dependencies in `package.json`, so `pnpm prune --prod` keeps the whole packages.
 
 `better-sqlite3` ships prebuilt binaries for several platforms, but it has no
 install/postinstall script of its own — only a `binding.gyp` — and npm/pnpm's
@@ -120,7 +153,9 @@ implicit rule for that combination is to run `node-gyp rebuild` at install time
 neither Python nor a compiler, so that step fails outright unless the toolchain
 is installed first; that's the entire reason the builder stage carries
 `python3 make g++` even though nothing else in the app needs to compile
-anything.
+anything. Because it compiles in the builder stage and the compiled result
+travels across in the pruned `node_modules`, the runtime stage never needs that
+toolchain itself.
 
 **Before the first deploy, in the CapRover dashboard:**
 
@@ -148,12 +183,19 @@ The container listens on port 80 by default (`ENV PORT=80` in the Dockerfile),
 matching CapRover's default "Container HTTP Port" — no HTTP Settings change
 needed there unless you've customised it.
 
-Docker wasn't available in the environment this was written in, so the build
-was never run end to end locally — the `binding.gyp`/Python failure above was
-caught from a real CapRover build log and fixed directly against that error,
-but there's no guarantee it's the only issue a full build will surface. Watch
-the next deploy's build log, or run `docker build -t gpxfolio .` yourself, and
-report back anything else that comes up.
+Docker wasn't available in the environment this was written in, so this has
+been fixed twice now against real deploy evidence rather than a local `docker
+build` — the `binding.gyp`/Python failure and the missing-`migrator.js` crash
+were both diagnosed from actual CapRover logs, and both fixes were checked as
+far as possible without running Docker (dependency reachability confirmed with
+`pnpm why --prod`, the missing file confirmed present in a normal, unpruned
+install). Neither issue was subtle or intermittent — each broke the same way
+on every attempt — which is reassuring, but two rounds of "worked on paper,
+didn't work in practice" is also a reason not to fully trust the third round
+sight unseen. Watch the next deploy's build log, and confirm the app is
+actually reachable afterward — CapRover will keep serving the previous
+deployment if the new one fails to start, so a quiet build log isn't proof the
+new container is the one actually live.
 
 ## Commands
 
@@ -163,9 +205,7 @@ report back anything else that comes up.
 | `pnpm build` / `pnpm start` | Production build / serve |
 | `pnpm test` | Vitest suite (GPX pipeline, formatting, ids) |
 | `pnpm typecheck` | `tsc --noEmit` |
-| `pnpm db:generate` | Generate a migration after editing the schema |
-| `pnpm db:migrate` | Apply migrations |
-| `pnpm db:studio` | Browse the database |
+| `pnpm db:migrate` | Apply pending migrations |
 
 `dev` and `build` both first run `scripts/copy-maplibre-worker.mjs`, which copies
 MapLibre's Web Worker into `public/maplibre/` (gitignored). This is not
