@@ -145,12 +145,6 @@ export default function RoutePage() {
                   class="h-[52vh] max-h-[620px] min-h-[280px] w-full overflow-hidden rounded-xl border border-subtle sm:h-[58dvh]"
                 />
 
-                <StatsGrid
-                  stats={route().stats}
-                  activityType={route().activityType}
-                  class="mt-4"
-                />
-
                 <section class="card mt-4 rounded-xl px-2 py-3 sm:px-4">
                   <h2 class="ink-muted mb-1 px-2 text-[0.6875rem] font-semibold uppercase tracking-wider">
                     Elevation
@@ -161,6 +155,12 @@ export default function RoutePage() {
                     setHovered={setHovered}
                   />
                 </section>
+
+                <StatsGrid
+                  stats={route().stats}
+                  activityType={route().activityType}
+                  class="mt-4"
+                />
 
                 <Show when={route().tracks.length > 1}>
                   <section class="mt-4">
