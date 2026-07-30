@@ -232,3 +232,19 @@ export function trackValues(track: Track): Insertable<TracksTable> {
     startedAt: toEpoch(track.startedAt),
   };
 }
+
+export function toPhoto(row: Selectable<PhotosTable>): Photo {
+  return {
+    ...row,
+    takenAt: toDate(row.takenAt),
+    createdAt: new Date(row.createdAt),
+  };
+}
+
+export function photoValues(photo: Photo): Insertable<PhotosTable> {
+  return {
+    ...photo,
+    takenAt: toEpoch(photo.takenAt),
+    createdAt: photo.createdAt.getTime(),
+  };
+}

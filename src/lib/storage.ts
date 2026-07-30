@@ -9,7 +9,8 @@ import { gunzipSync, gzipSync } from "node:zlib";
  *   data/
  *     gpxfolio.db
  *     blobs/<routeId>/tracks/<trackId>.gpx.gz
- *     blobs/<routeId>/photos/<photoId>.<ext>     (planned)
+ *     blobs/<routeId>/photos/<photoId>.jpg          (full, long edge 2048px)
+ *     blobs/<routeId>/photos/<photoId>_thumb.jpg    (thumbnail, long edge 480px)
  */
 
 export const databasePath = resolve(process.env.DATABASE_PATH ?? "./data/gpxfolio.db");
@@ -43,6 +44,14 @@ export function routePhotosDir(routeId: string): string {
   return join(routeBlobDir(routeId), "photos");
 }
 
+export type PhotoVariant = "full" | "thumb";
+
+function photoPath(routeId: string, photoId: string, variant: PhotoVariant): string {
+  assertSafeId(photoId, "photo id");
+  const suffix = variant === "thumb" ? "_thumb.jpg" : ".jpg";
+  return join(routePhotosDir(routeId), `${photoId}${suffix}`);
+}
+
 /**
  * Stores the original upload gzipped. GPX is verbose XML that compresses to
  * roughly a tenth of its size, and keeping the original means a viewer can
@@ -62,6 +71,33 @@ export async function writeTrackGpx(
 export async function readTrackGpx(routeId: string, trackId: string): Promise<string> {
   const compressed = await readFile(trackGpxPath(routeId, trackId));
   return gunzipSync(compressed).toString("utf8");
+}
+
+/** `bytes` is already a compressed JPEG from the resize pipeline, so no gzip here. */
+export async function writePhoto(
+  routeId: string,
+  photoId: string,
+  variant: PhotoVariant,
+  bytes: Buffer,
+): Promise<void> {
+  const path = photoPath(routeId, photoId, variant);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, bytes);
+}
+
+export async function readPhoto(
+  routeId: string,
+  photoId: string,
+  variant: PhotoVariant,
+): Promise<Buffer> {
+  return readFile(photoPath(routeId, photoId, variant));
+}
+
+export async function deletePhoto(routeId: string, photoId: string): Promise<void> {
+  await Promise.all([
+    rm(photoPath(routeId, photoId, "full"), { force: true }),
+    rm(photoPath(routeId, photoId, "thumb"), { force: true }),
+  ]);
 }
 
 /** Removes a route's blobs. Safe to call when the directory was never created. */

@@ -36,6 +36,27 @@ function visibilityOf(formData: FormData): "public" | "unlisted" {
   return formData.get("visibility") === "public" ? "public" : "unlisted";
 }
 
+const MAX_PHOTO_BYTES = 30 * 1024 * 1024;
+
+/** Reads the uploaded photos out of a FormData, enforcing size. Extension is validated server-side. */
+async function readImageFiles(formData: FormData, field = "photos") {
+  const entries = formData.getAll(field).filter((v): v is File => v instanceof File);
+  const files: Array<{ filename: string; bytes: Buffer }> = [];
+
+  for (const file of entries) {
+    if (file.size === 0) continue; // Empty file input posts a zero-byte entry.
+    const { ValidationError } = await import("./routes.server");
+    if (file.size > MAX_PHOTO_BYTES) {
+      throw new ValidationError(
+        `${file.name} is larger than the ${Math.round(MAX_PHOTO_BYTES / 1024 / 1024)} MB limit.`,
+      );
+    }
+    files.push({ filename: file.name, bytes: Buffer.from(await file.arrayBuffer()) });
+  }
+
+  return files;
+}
+
 /**
  * Errors are returned, not thrown, so the form can render them inline;
  * `redirect` is still thrown, which is how the router detects a navigation.
@@ -133,6 +154,70 @@ export const deleteRouteAction = action(async (formData: FormData) => {
   await deleteRoute(String(formData.get("routeId") ?? ""));
   throw redirect("/admin");
 }, "deleteRoute");
+
+/**
+ * Deliberate exception to "always redirect on success": the admin needs to
+ * see the inference summary (and which photos got placed how) right after
+ * upload, so this returns the result inline instead of navigating away. The
+ * router still revalidates every active query afterward, so the photo grid
+ * on the edit page refreshes regardless.
+ */
+export const addPhotosAction = action(async (formData: FormData) => {
+  "use server";
+  const { requireAdmin } = await import("./auth");
+  const { addPhotosToRoute } = await import("./photos.server");
+  const { ValidationError } = await import("./routes.server");
+  await requireAdmin();
+
+  const routeId = String(formData.get("routeId") ?? "");
+  try {
+    const files = await readImageFiles(formData);
+    if (files.length === 0) return new ValidationError("Select at least one photo.");
+    return await addPhotosToRoute(routeId, files);
+  } catch (error) {
+    if (error instanceof ValidationError) return error;
+    throw error;
+  }
+}, "addPhotos");
+
+export const updatePhotoCaptionAction = action(async (formData: FormData) => {
+  "use server";
+  const { requireAdmin } = await import("./auth");
+  const { updatePhotoCaption } = await import("./photos.server");
+  await requireAdmin();
+
+  const routeId = String(formData.get("routeId") ?? "");
+  await updatePhotoCaption(
+    routeId,
+    String(formData.get("photoId") ?? ""),
+    String(formData.get("caption") ?? ""),
+  );
+  throw redirect(`/admin/${routeId}/edit`);
+}, "updatePhotoCaption");
+
+export const deletePhotoAction = action(async (formData: FormData) => {
+  "use server";
+  const { requireAdmin } = await import("./auth");
+  const { deletePhoto } = await import("./photos.server");
+  await requireAdmin();
+
+  const routeId = String(formData.get("routeId") ?? "");
+  await deletePhoto(routeId, String(formData.get("photoId") ?? ""));
+  throw redirect(`/admin/${routeId}/edit`);
+}, "deletePhoto");
+
+export const nudgePhotoTimesAction = action(async (formData: FormData) => {
+  "use server";
+  const { requireAdmin } = await import("./auth");
+  const { nudgePhotoTimes } = await import("./photos.server");
+  await requireAdmin();
+
+  const routeId = String(formData.get("routeId") ?? "");
+  const photoIds = JSON.parse(String(formData.get("photoIds") ?? "[]")) as string[];
+  const deltaMinutes = Number(formData.get("deltaMinutes") ?? "0");
+  await nudgePhotoTimes(routeId, photoIds, deltaMinutes);
+  throw redirect(`/admin/${routeId}/edit`);
+}, "nudgePhotoTimes");
 
 export const logoutAction = action(async () => {
   "use server";

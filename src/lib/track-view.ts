@@ -1,5 +1,5 @@
 import { decodePolyline } from "./gpx/encode";
-import type { Track } from "./db/schema";
+import type { Photo, Track } from "./db/schema";
 import type { BBox } from "./gpx/types";
 
 /**
@@ -38,6 +38,39 @@ export function toTrackView(track: Track): TrackView {
     distanceM: track.distanceM,
     elevationGainM: track.elevationGainM,
     startedAt: track.startedAt?.getTime() ?? null,
+  };
+}
+
+/** The shape a route page needs to render one gallery/map photo. */
+export interface PhotoView {
+  id: string;
+  caption: string | null;
+  /** Resolved capture instant (epoch ms), or null if it couldn't be determined. */
+  takenAt: number | null;
+  lat: number | null;
+  lon: number | null;
+  /** Metres from the associated track's start, for the elevation-profile marker. Null if unmatched. */
+  distanceAlongM: number | null;
+  trackId: string | null;
+  width: number | null;
+  height: number | null;
+  thumbUrl: string;
+  fullUrl: string;
+}
+
+export function toPhotoView(photo: Photo, slug: string): PhotoView {
+  return {
+    id: photo.id,
+    caption: photo.caption,
+    takenAt: photo.takenAt?.getTime() ?? null,
+    lat: photo.lat,
+    lon: photo.lon,
+    distanceAlongM: photo.distanceAlongM,
+    trackId: photo.trackId,
+    width: photo.width,
+    height: photo.height,
+    thumbUrl: `/api/routes/${slug}/photos/${photo.id}?thumb=1`,
+    fullUrl: `/api/routes/${slug}/photos/${photo.id}`,
   };
 }
 

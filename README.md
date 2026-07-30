@@ -107,8 +107,9 @@ Everything that matters lives in one directory:
 
 ```text
 data/
-  gpxfolio.db                               routes, tracks, stats
-  blobs/<routeId>/tracks/<trackId>.gpx.gz   original uploads
+  gpxfolio.db                                 routes, tracks, photos, stats
+  blobs/<routeId>/tracks/<trackId>.gpx.gz     original GPX uploads
+  blobs/<routeId>/photos/<photoId>.jpg        resized photos (full + _thumb)
 ```
 
 ## Deploying to CapRover
@@ -252,10 +253,41 @@ are identical before and after simplification, that no original point strays
 further than tolerance + quantisation from the stored line, and that total track
 length is preserved to within 0.5%.
 
-## Planned: photos
+## Photos
 
-The `photos` table and the `data/blobs/<routeId>/photos/` path already exist and
-are documented in `src/lib/db/schema.ts`, so the feature needs no migration. The
-intended flow is to read EXIF `DateTimeOriginal` from an upload and match it
-against `tracks.timeOffsets` to place the photo along the route, preferring the
-image's own GPS tags when present. Nothing reads the table yet.
+The admin can attach photos to a route from its edit page. Each upload is
+re-encoded with `sharp` into two fixed-size JPEGs — a 2048px display size and a
+480px gallery thumbnail — and the original bytes are discarded, so
+`data/blobs/<routeId>/photos/<photoId>.jpg` / `<photoId>_thumb.jpg` are all
+that's kept. HEIC/HEIF uploads are rejected with a message to export as JPEG
+first; Alpine has no `libheif`, so this needs no Dockerfile change.
+
+**Placement is a two-part problem: time, then position.** `exifr`
+(`src/lib/photos/exif.ts`) reads each photo's `DateTimeOriginal`,
+`OffsetTimeOriginal`, GPS timestamp and GPS lat/lon. GPX `<time>` always parses
+to a real UTC instant, but `DateTimeOriginal` is naive local wall-clock time
+with no timezone — the camera's clock has no guaranteed relationship to where
+the GPX was recorded. Resolution order for the capture instant: the photo's own
+GPS timestamp (already UTC) beats an explicit `OffsetTimeOriginal`, which beats
+a **batch-inferred camera offset** (`src/lib/photos/offset.ts`): a bounded
+search over every plausible UTC offset, picking whichever keeps the most
+naive timestamps in one upload batch inside the route's own recorded time span.
+Ties (more than one offset fits equally well) are broken toward the *median* of
+the tied candidates, not the one closest to zero — the true offset sits at the
+centre of that band, and biasing toward "no correction" would defeat the point.
+
+For position, the photo's own GPS tags win unconditionally when present
+(`src/lib/photos/match.ts` still looks up a nearby track point, within 300 m,
+purely for the elevation-profile's `distanceAlongM`). Without GPS, the resolved
+capture instant is matched against each track's own time span, snapping the
+photo to that track's coordinate at the nearest recorded moment. An admin can
+manually shift a batch's capture times (in the edit page's photo toolbar) if
+the inferred offset looks wrong — this adjusts `takenAt` for gallery
+ordering/display, but deliberately doesn't try to re-derive a pin's position
+after the fact, since a persisted photo no longer records whether its
+coordinates came from its own GPS tags (which shouldn't move) or a
+time-matched track point (which should).
+
+Photos show as a gallery on the route page and as pins on the map (hand-built
+MapLibre `Marker`s, like the existing start/finish endpoints — no plugin);
+clicking a pin opens the gallery to that photo.

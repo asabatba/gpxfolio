@@ -1,11 +1,13 @@
-import type { Updateable } from "kysely";
+import { sql, type Updateable } from "kysely";
 import { db } from "./db";
 import {
   routeValues,
   toJson,
+  toPhoto,
   toRoute,
   toTrack,
   trackValues,
+  type Photo,
   type Route,
   type RoutesTable,
   type Track,
@@ -50,6 +52,7 @@ export const MAX_FILES_PER_ROUTE = 10;
 
 export interface RouteWithTracks extends Route {
   tracks: Track[];
+  photos: Photo[];
 }
 
 export class ValidationError extends Error {
@@ -378,6 +381,18 @@ export async function deleteRoute(routeId: string): Promise<void> {
 }
 
 export async function deleteTrack(routeId: string, trackId: string): Promise<void> {
+  // distanceAlongM is only meaningful relative to this track's own distance
+  // series, so it goes stale the moment the track is gone — clear it before
+  // the delete, since the FK's ON DELETE SET NULL will already have nulled
+  // photos.trackId by the time we could otherwise select on it. lat/lon are
+  // untouched: they're still a valid point in space either way.
+  await db
+    .updateTable("photos")
+    .set({ distanceAlongM: null })
+    .where("routeId", "=", routeId)
+    .where("trackId", "=", trackId)
+    .execute();
+
   await db
     .deleteFrom("tracks")
     .where("id", "=", trackId)
@@ -387,15 +402,31 @@ export async function deleteTrack(routeId: string, trackId: string): Promise<voi
   await recomputeRouteAggregates(routeId);
 }
 
+/** Gallery/pin order: earliest capture first, undated photos last, then upload order. */
+export async function listRoutePhotos(routeId: string): Promise<Photo[]> {
+  const rows = await db
+    .selectFrom("photos")
+    .selectAll()
+    .where("routeId", "=", routeId)
+    .orderBy(sql`taken_at is null`)
+    .orderBy("takenAt", "asc")
+    .orderBy("orderIndex", "asc")
+    .execute();
+  return rows.map(toPhoto);
+}
+
 async function withTracks(route: Route | undefined): Promise<RouteWithTracks | null> {
   if (!route) return null;
-  const rows = await db
-    .selectFrom("tracks")
-    .selectAll()
-    .where("routeId", "=", route.id)
-    .orderBy("orderIndex asc")
-    .execute();
-  return { ...route, tracks: rows.map(toTrack) };
+  const [tracks, photos] = await Promise.all([
+    db
+      .selectFrom("tracks")
+      .selectAll()
+      .where("routeId", "=", route.id)
+      .orderBy("orderIndex asc")
+      .execute(),
+    listRoutePhotos(route.id),
+  ]);
+  return { ...route, tracks: tracks.map(toTrack), photos };
 }
 
 export async function getRouteBySlug(slug: string): Promise<RouteWithTracks | null> {

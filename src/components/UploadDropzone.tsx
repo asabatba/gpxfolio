@@ -7,14 +7,27 @@ interface UploadDropzoneProps {
   maxBytes: number;
   /** Reports the current selection so the parent can enable/disable submit. */
   onChange?: (files: File[]) => void;
+  /** `<input accept>` value. Defaults to GPX. */
+  accept?: string;
+  /** Filename check; a candidate failing this is rejected with `extensionError`. Defaults to `.gpx`. */
+  extensionPattern?: RegExp;
+  /** Shown when a file fails `extensionPattern`, prefixed with the filename. Defaults to "is not a .gpx file." */
+  extensionError?: string;
+  /** Button copy. Defaults to "Choose GPX files". */
+  buttonLabel?: string;
+  /** Hint line under the button; `{max}` files, `{size}` each are filled in for you. Defaults to the GPX copy. */
+  hint?: string;
 }
+
+const GPX_EXTENSION_PATTERN = /\.gpx$/i;
 
 /**
  * Drag-and-drop plus a normal file picker.
  *
  * The picker input is kept in the DOM and its `files` set programmatically via a
  * DataTransfer, so dropped files take part in the ordinary form submission
- * instead of needing a separate upload path.
+ * instead of needing a separate upload path. Defaults to GPX; pass `accept`/
+ * `extensionPattern`/copy props to reuse it for other file types (photos).
  */
 export default function UploadDropzone(props: UploadDropzoneProps) {
   let input!: HTMLInputElement;
@@ -22,11 +35,14 @@ export default function UploadDropzone(props: UploadDropzoneProps) {
   const [dragging, setDragging] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
+  const extensionPattern = () => props.extensionPattern ?? GPX_EXTENSION_PATTERN;
+  const extensionError = () => props.extensionError ?? "is not a .gpx file.";
+
   function validate(candidates: File[]): { accepted: File[]; problem: string | null } {
     const accepted: File[] = [];
     for (const file of candidates) {
-      if (!/\.gpx$/i.test(file.name)) {
-        return { accepted: [], problem: `${file.name} is not a .gpx file.` };
+      if (!extensionPattern().test(file.name)) {
+        return { accepted: [], problem: `${file.name} ${extensionError()}` };
       }
       if (file.size > props.maxBytes) {
         return {
@@ -87,7 +103,7 @@ export default function UploadDropzone(props: UploadDropzoneProps) {
           id={props.name}
           name={props.name}
           type="file"
-          accept=".gpx,application/gpx+xml"
+          accept={props.accept ?? ".gpx,application/gpx+xml"}
           multiple
           class="sr-only"
           onChange={(event) => apply(Array.from(event.currentTarget.files ?? []))}
@@ -109,10 +125,11 @@ export default function UploadDropzone(props: UploadDropzoneProps) {
           />
         </svg>
         <label for={props.name} class="btn btn-secondary cursor-pointer">
-          Choose GPX files
+          {props.buttonLabel ?? "Choose GPX files"}
         </label>
         <p class="ink-muted mt-2 text-xs">
-          or drop them here — up to {props.maxFiles} files, {formatBytes(props.maxBytes)} each
+          {props.hint ??
+            `or drop them here — up to ${props.maxFiles} files, ${formatBytes(props.maxBytes)} each`}
         </p>
       </div>
 

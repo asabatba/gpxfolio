@@ -3,12 +3,13 @@ import { A, createAsync, query, useParams, type RouteDefinition } from "@solidjs
 import { clientOnly } from "@solidjs/start";
 import { createSignal, For, Show, Suspense } from "solid-js";
 import ElevationProfile from "~/components/ElevationProfile";
+import PhotoGallery from "~/components/PhotoGallery";
 import ShareButton from "~/components/ShareButton";
 import SiteHeader from "~/components/SiteHeader";
 import StatsGrid from "~/components/StatsGrid";
 import { formatDate, formatDistance, formatElevation } from "~/lib/format";
 import type { RouteStats } from "~/lib/gpx/types";
-import { bboxOrFallback, toTrackView, type HoverPoint } from "~/lib/track-view";
+import { bboxOrFallback, toPhotoView, toTrackView, type HoverPoint } from "~/lib/track-view";
 
 // MapLibre touches `window` at import time, so it must never be evaluated on the
 // server. Everything else on this page is server-rendered.
@@ -43,6 +44,7 @@ const getRoute = query(async (slug: string) => {
       maxSpeedMps: route.maxSpeedMps,
     } satisfies RouteStats,
     tracks: route.tracks.map(toTrackView),
+    photos: route.photos.map((photo) => toPhotoView(photo, route.slug)),
     totalPointsOriginal: route.tracks.reduce((sum, t) => sum + t.pointCountOriginal, 0),
     totalPointsStored: route.tracks.reduce((sum, t) => sum + t.pointCountStored, 0),
   };
@@ -60,6 +62,7 @@ export default function RoutePage() {
   // route's — which defeats the point of a shareable page.
   const data = createAsync(() => getRoute(params.slug as string), { deferStream: true });
   const [hovered, setHovered] = createSignal<HoverPoint | null>(null);
+  const [selectedPhotoId, setSelectedPhotoId] = createSignal<string | null>(null);
 
   return (
     <Suspense
@@ -142,6 +145,8 @@ export default function RoutePage() {
                   tracks={route().tracks}
                   bbox={bboxOrFallback(route().bbox, route().tracks)}
                   hovered={hovered}
+                  photos={route().photos}
+                  onSelectPhoto={setSelectedPhotoId}
                   class="h-[52vh] max-h-[620px] min-h-[280px] w-full overflow-hidden rounded-xl border border-subtle sm:h-[58dvh]"
                 />
 
@@ -155,6 +160,19 @@ export default function RoutePage() {
                     setHovered={setHovered}
                   />
                 </section>
+
+                <Show when={route().photos.length > 0}>
+                  <section class="card mt-4 rounded-xl px-2 py-3 sm:px-4">
+                    <h2 class="ink-muted mb-2 px-2 text-[0.6875rem] font-semibold uppercase tracking-wider">
+                      Photos
+                    </h2>
+                    <PhotoGallery
+                      photos={route().photos}
+                      selected={selectedPhotoId}
+                      onSelect={setSelectedPhotoId}
+                    />
+                  </section>
+                </Show>
 
                 <StatsGrid
                   stats={route().stats}

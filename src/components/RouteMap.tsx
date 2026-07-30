@@ -10,7 +10,7 @@ import {
 } from "maplibre-gl";
 import { createEffect, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import type { BBox } from "~/lib/gpx/types";
-import type { HoverPoint, TrackView } from "~/lib/track-view";
+import type { HoverPoint, PhotoView, TrackView } from "~/lib/track-view";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 /**
@@ -24,6 +24,9 @@ interface RouteMapProps {
   bbox: BBox | null;
   /** Point currently hovered on the elevation profile, marked on the map. */
   hovered: Accessor<HoverPoint | null>;
+  /** Photos with a resolved position get a pin; others are omitted. */
+  photos?: PhotoView[];
+  onSelectPhoto?: (id: string) => void;
   class?: string;
 }
 
@@ -89,7 +92,26 @@ export default function RouteMap(props: RouteMapProps) {
   let container!: HTMLDivElement;
   let map: MapLibreMap | undefined;
   let hoverMarker: Marker | undefined;
+  const photoMarkers: Marker[] = [];
   const [ready, setReady] = createSignal(false);
+
+  /**
+   * Photo pins, drawn once on initial load rather than from `styledata` like
+   * `drawTracks` — MapLibre `Marker`s are plain DOM overlays independent of
+   * the style/sources, so they survive a basemap swap (see the fallback
+   * handler below) without needing to be re-added.
+   */
+  function drawPhotoPins(instance: MapLibreMap) {
+    for (const photo of props.photos ?? []) {
+      if (photo.lat == null || photo.lon == null) continue;
+      const el = document.createElement("button");
+      el.type = "button";
+      el.setAttribute("aria-label", photo.caption ?? "Photo");
+      el.style.cssText = `width:28px;height:28px;border-radius:50%;background-image:url("${photo.thumbUrl}");background-size:cover;background-position:center;border:2.5px solid #fff;box-shadow:0 1px 4px rgb(0 0 0 / 0.4);cursor:pointer;padding:0;`;
+      el.addEventListener("click", () => props.onSelectPhoto?.(photo.id));
+      photoMarkers.push(new Marker({ element: el }).setLngLat([photo.lon, photo.lat]).addTo(instance));
+    }
+  }
 
   /** Adds the source+layers for every track. Re-run whenever the style reloads. */
   function drawTracks(instance: MapLibreMap) {
@@ -205,6 +227,7 @@ export default function RouteMap(props: RouteMapProps) {
     instance.on("load", () => {
       drawTracks(instance);
       fitToRoute(instance);
+      drawPhotoPins(instance);
       setReady(true);
     });
 
@@ -234,6 +257,9 @@ export default function RouteMap(props: RouteMapProps) {
 
     onCleanup(() => {
       hoverMarker?.remove();
+      photoMarkers.forEach((marker) => {
+        marker.remove();
+      });
       instance.remove();
     });
   });
