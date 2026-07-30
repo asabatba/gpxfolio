@@ -12,7 +12,7 @@ const getGallery = query(async () => {
   const thumbnails = await listRouteThumbnails(routes.map((r) => r.id));
 
   return {
-    siteName: process.env.PUBLIC_SITE_NAME ?? "My Routes",
+    siteName: process.env.PUBLIC_SITE_NAME ?? "gpxfolio",
     routes: routes.map((route) => ({
       slug: route.slug,
       title: route.title,

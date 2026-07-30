@@ -59,7 +59,7 @@ function mergeGpx(documents: string[], title: string): string {
   }
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="gpx-share"
+<gpx version="1.1" creator="gpxfolio"
      xmlns="http://www.topografix.com/GPX/1/1"
      xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">
   <metadata>

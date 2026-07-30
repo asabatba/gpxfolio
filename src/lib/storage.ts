@@ -7,12 +7,12 @@ import { gunzipSync, gzipSync } from "node:zlib";
  * place that knows the on-disk layout:
  *
  *   data/
- *     gpx-share.db
+ *     gpxfolio.db
  *     blobs/<routeId>/tracks/<trackId>.gpx.gz
  *     blobs/<routeId>/photos/<photoId>.<ext>     (planned)
  */
 
-export const databasePath = resolve(process.env.DATABASE_PATH ?? "./data/gpx-share.db");
+export const databasePath = resolve(process.env.DATABASE_PATH ?? "./data/gpxfolio.db");
 
 /** Blobs live next to the database so a single directory is all that needs backing up. */
 export const dataDir = dirname(databasePath);

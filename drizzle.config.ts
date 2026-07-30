@@ -5,7 +5,7 @@ export default defineConfig({
   schema: "./src/lib/db/schema.ts",
   out: "./drizzle",
   dbCredentials: {
-    url: process.env.DATABASE_PATH ?? "./data/gpx-share.db",
+    url: process.env.DATABASE_PATH ?? "./data/gpxfolio.db",
   },
   strict: true,
   verbose: true,

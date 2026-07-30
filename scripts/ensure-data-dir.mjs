@@ -4,7 +4,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-const databasePath = resolve(process.env.DATABASE_PATH ?? "./data/gpx-share.db");
+const databasePath = resolve(process.env.DATABASE_PATH ?? "./data/gpxfolio.db");
 const blobs = resolve(dirname(databasePath), "blobs");
 
 mkdirSync(blobs, { recursive: true });

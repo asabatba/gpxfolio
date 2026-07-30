@@ -1,0 +1,25 @@
+node_modules
+.output
+.vinxi
+.solid
+.nitro
+
+# Copied at build time by scripts/copy-maplibre-worker.mjs; a stale local
+# copy shouldn't leak into the build context.
+public/maplibre/
+
+# Local database, blobs and secrets never belong in the image — the runtime
+# data directory is a mounted volume instead (see Dockerfile).
+data/
+.env
+.env.*
+!.env.example
+
+test/
+src/**/*.test.ts
+
+.git
+.claude
+*.log
+.DS_Store
+Thumbs.db

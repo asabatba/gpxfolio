@@ -30,7 +30,7 @@ const getRoute = query(async (slug: string) => {
     visibility: route.visibility,
     startedAt: route.startedAt?.getTime() ?? null,
     bbox: route.bbox ?? null,
-    siteName: process.env.PUBLIC_SITE_NAME ?? "My Routes",
+    siteName: process.env.PUBLIC_SITE_NAME ?? "gpxfolio",
     stats: {
       distanceM: route.distanceM,
       elevationGainM: route.elevationGainM,

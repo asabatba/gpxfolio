@@ -9,7 +9,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-const databasePath = resolve(process.env.DATABASE_PATH ?? "./data/gpx-share.db");
+const databasePath = resolve(process.env.DATABASE_PATH ?? "./data/gpxfolio.db");
 mkdirSync(resolve(dirname(databasePath), "blobs"), { recursive: true });
 
 const sqlite = new Database(databasePath);

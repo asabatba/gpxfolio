@@ -1,4 +1,4 @@
-# gpx-share
+# gpxfolio
 
 A personal site for sharing recorded routes. Upload one or more GPX files, get a
 polished, mobile-friendly page with a MapLibre map, statistics pulled from the
@@ -48,7 +48,7 @@ road network.
 ```bash
 pnpm install
 cp .env.example .env      # then edit it — see below
-pnpm db:migrate           # creates ./data/gpx-share.db
+pnpm db:migrate           # creates ./data/gpxfolio.db
 pnpm dev                  # http://localhost:3000
 ```
 
@@ -58,7 +58,7 @@ Set these in `.env`:
 | --- | --- |
 | `ADMIN_PASSWORD` | The single password used at `/login` to upload and edit. |
 | `SESSION_SECRET` | Signs the session cookie. Must be ≥32 characters. |
-| `DATABASE_PATH` | SQLite file location. Defaults to `./data/gpx-share.db`. |
+| `DATABASE_PATH` | SQLite file location. Defaults to `./data/gpxfolio.db`. |
 | `PUBLIC_SITE_URL` | Public origin, used for absolute share URLs. |
 | `PUBLIC_SITE_NAME` | Site name shown in the header. |
 
@@ -90,9 +90,60 @@ Everything that matters lives in one directory:
 
 ```text
 data/
-  gpx-share.db                              routes, tracks, stats
+  gpxfolio.db                               routes, tracks, stats
   blobs/<routeId>/tracks/<trackId>.gpx.gz   original uploads
 ```
+
+## Deploying to CapRover
+
+`Dockerfile`, `.dockerignore` and `captain-definition` are set up at the repo
+root — `caprover deploy` (or a connected git repo) builds and ships the app
+with no extra config beyond what's below.
+
+**How the image is built.** Two stages: the builder installs with pnpm and runs
+`pnpm build`; the runtime stage copies out only `.output/`. Nitro's node-server
+preset bundles every dependency the server needs directly into
+`.output/server/node_modules` — including its own copy of `better-sqlite3` with
+a prebuilt native binary for `linuxmusl-x64` — so the runtime image needs no
+node_modules of its own and Alpine needs no compiler toolchain. Migrations run
+via `node .output/server/migrate.mjs` (a copy of `scripts/migrate.mjs` placed
+next to the built server at build time, so it can resolve `better-sqlite3` and
+`drizzle-orm` from `.output/server/node_modules` too) on every container start,
+before the server begins accepting traffic — so a schema change shipped in a
+new image is applied automatically on redeploy.
+
+**Before the first deploy, in the CapRover dashboard:**
+
+1. **App Configs → Persistent Directories** — add `/app/data`. Without this,
+   every redeploy starts from an empty site: routes, tracks and uploaded GPX
+   files all live under that path (see `src/lib/storage.ts`), and containers
+   are otherwise ephemeral.
+2. **App Configs → Environmental Variables** — set:
+   - `ADMIN_PASSWORD` — the upload/edit password.
+   - `SESSION_SECRET` — 32+ random characters (`node -e
+     "console.log(require('crypto').randomBytes(32).toString('hex'))"`).
+   - `PUBLIC_SITE_URL` — the app's public HTTPS URL, e.g.
+     `https://routes.yourdomain.com`.
+   - `PUBLIC_SITE_NAME` — optional; shown in the header.
+
+   `DATABASE_PATH` doesn't need setting — the default (`./data/gpxfolio.db`,
+   resolved against the container's `/app` working directory) already lands
+   inside the persistent directory from step 1.
+3. **HTTP Settings → Enable HTTPS** (and ideally **Force HTTPS**). The session
+   cookie is marked `Secure` whenever `NODE_ENV=production` (set in the
+   Dockerfile), so it's dropped by the browser on a plain-HTTP connection and
+   `/login` will silently fail to keep you signed in until HTTPS is on.
+
+The container listens on port 80 by default (`ENV PORT=80` in the Dockerfile),
+matching CapRover's default "Container HTTP Port" — no HTTP Settings change
+needed there unless you've customised it.
+
+This Dockerfile setup was written and reasoned through carefully — every claim
+about how Nitro bundles dependencies and reads `PORT`/`HOST` was checked
+against a real local build — but wasn't exercised end to end with `docker
+build`, since Docker wasn't available in the environment it was written in. Run
+`docker build -t gpxfolio .` (or a CapRover deploy, which does the same thing)
+as your first real check before relying on it in production.
 
 ## Commands
 

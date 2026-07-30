@@ -12,7 +12,7 @@ interface SessionData {
   admin?: boolean;
 }
 
-const SESSION_NAME = "gpx_share_session";
+const SESSION_NAME = "gpxfolio_session";
 
 function sessionSecret(): string {
   const secret = process.env.SESSION_SECRET;
