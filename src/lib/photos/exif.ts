@@ -1,4 +1,9 @@
-import { gps, parse } from "exifr";
+// exifr ships a CJS/UMD bundle; Vite's dev SSR module runner can't statically
+// detect named exports on it (unlike vitest's transform or Rollup's production
+// bundling, which both handle this fine), so the default-import + destructure
+// form is what actually works across all three environments.
+import exifr from "exifr";
+const { gps, parse } = exifr;
 
 /**
  * Normalized EXIF facts this app cares about, read from an uploaded photo.
