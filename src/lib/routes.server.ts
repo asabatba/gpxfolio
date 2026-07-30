@@ -1,0 +1,423 @@
+import { and, asc, desc, eq } from "drizzle-orm";
+import { db } from "./db";
+import { routes, tracks, type Route, type Track, type Visibility } from "./db/schema";
+import { buildTrack } from "./gpx/build";
+import { mergeBounds } from "./gpx/geo";
+import { parseGpx } from "./gpx/parse";
+import { aggregateStats } from "./gpx/stats";
+import { GpxParseError, type BBox, type RouteStats } from "./gpx/types";
+import { buildSlug, generateId } from "./ids";
+import { deleteRouteBlobs, deleteTrackGpx, writeTrackGpx } from "./storage";
+
+/**
+ * Server-only data access. Everything here touches SQLite or the filesystem, so
+ * it must only be reached from `"use server"` functions — the `.server.ts`
+ * suffix makes an accidental client import obvious.
+ */
+
+/** Distinct, colour-blind-friendly line colours, assigned per track in order. */
+const TRACK_COLORS = [
+  "#e8590c", // orange
+  "#1c7ed6", // blue
+  "#2f9e44", // green
+  "#ae3ec9", // purple
+  "#e03131", // red
+  "#0c8599", // teal
+  "#f08c00", // amber
+  "#5f3dc4", // indigo
+];
+
+export const MAX_FILE_BYTES = 25 * 1024 * 1024;
+export const MAX_FILES_PER_ROUTE = 10;
+
+export interface RouteWithTracks extends Route {
+  tracks: Track[];
+}
+
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
+
+export interface UploadedGpx {
+  filename: string;
+  xml: string;
+}
+
+export interface IngestResult {
+  route: Route;
+  /** Per-file compression summary, surfaced to the admin after upload. */
+  summary: Array<{
+    filename: string;
+    pointsOriginal: number;
+    pointsStored: number;
+    droppedOutliers: number;
+  }>;
+}
+
+/** Validates one upload and turns it into rows, without touching the database. */
+function prepareTracks(files: UploadedGpx[]) {
+  if (files.length === 0) {
+    throw new ValidationError("Select at least one GPX file.");
+  }
+  if (files.length > MAX_FILES_PER_ROUTE) {
+    throw new ValidationError(
+      `Up to ${MAX_FILES_PER_ROUTE} files per route; you selected ${files.length}.`,
+    );
+  }
+
+  const prepared: Array<{
+    name: string | null;
+    sourceFilename: string;
+    xml: string;
+    built: ReturnType<typeof buildTrack>;
+  }> = [];
+
+  for (const file of files) {
+    // Parsing every file before any write means a bad file at position 5
+    // doesn't leave the first four persisted.
+    let parsed;
+    try {
+      parsed = parseGpx(file.xml);
+    } catch (error) {
+      const detail = error instanceof GpxParseError ? error.message : "Unreadable file.";
+      throw new ValidationError(`${file.filename}: ${detail}`);
+    }
+
+    // A GPX may hold several <trk> elements; each becomes its own track so it
+    // gets its own colour, stats and toggle on the page.
+    for (const track of parsed.tracks) {
+      prepared.push({
+        name: track.name ?? parsed.name ?? null,
+        sourceFilename: file.filename,
+        xml: file.xml,
+        built: buildTrack(track.points),
+      });
+    }
+  }
+
+  if (prepared.length === 0) {
+    throw new ValidationError("No usable tracks were found in the selected files.");
+  }
+
+  return prepared;
+}
+
+function rollupRoute(built: Array<ReturnType<typeof buildTrack>>): {
+  stats: RouteStats;
+  bbox: BBox;
+  startedAt: Date | null;
+} {
+  const stats = aggregateStats(built.map((b) => b.stats));
+  const bbox = mergeBounds(built.map((b) => b.bbox));
+  const starts = built.map((b) => b.startedAt).filter((t): t is number => t != null);
+  return {
+    stats,
+    bbox,
+    startedAt: starts.length > 0 ? new Date(Math.min(...starts)) : null,
+  };
+}
+
+export interface CreateRouteInput {
+  title: string;
+  description?: string | null;
+  visibility: Visibility;
+  activityType?: string | null;
+  files: UploadedGpx[];
+}
+
+/**
+ * Creates a route from one or more GPX files.
+ *
+ * Parsing and stats happen first, then the database rows are written in a single
+ * transaction, then the original files are written to disk. If a blob write
+ * fails the transaction is rolled back by hand, because SQLite cannot roll back
+ * the filesystem.
+ */
+export async function createRoute(input: CreateRouteInput): Promise<IngestResult> {
+  const title = input.title.trim();
+  if (!title) throw new ValidationError("Give the route a title.");
+
+  const prepared = prepareTracks(input.files);
+  const routeId = generateId();
+  const rollup = rollupRoute(prepared.map((p) => p.built));
+
+  const trackRows = prepared.map((p, index) => ({
+    id: generateId(),
+    routeId,
+    name: p.name,
+    sourceFilename: p.sourceFilename,
+    color: TRACK_COLORS[index % TRACK_COLORS.length],
+    orderIndex: index,
+    geometry: p.built.series.geometry,
+    elevations: p.built.series.elevations,
+    distances: p.built.series.distances,
+    timeOffsets: p.built.series.timeOffsets,
+    pointCountOriginal: p.built.series.pointCountOriginal,
+    pointCountStored: p.built.series.pointCountStored,
+    bbox: p.built.bbox,
+    startedAt: p.built.startedAt != null ? new Date(p.built.startedAt) : null,
+    ...p.built.stats,
+  }));
+
+  const now = new Date();
+  const [route] = db.transaction((tx) => {
+    const inserted = tx
+      .insert(routes)
+      .values({
+        id: routeId,
+        slug: buildSlug(title),
+        title,
+        description: input.description?.trim() || null,
+        visibility: input.visibility,
+        activityType: input.activityType?.trim() || null,
+        bbox: rollup.bbox,
+        startedAt: rollup.startedAt,
+        createdAt: now,
+        updatedAt: now,
+        ...rollup.stats,
+      })
+      .returning()
+      .all();
+
+    tx.insert(tracks).values(trackRows).run();
+    return inserted;
+  });
+
+  try {
+    // One file can contain several tracks; they share the same original XML.
+    await Promise.all(
+      trackRows.map((row, index) => writeTrackGpx(routeId, row.id, prepared[index].xml)),
+    );
+  } catch (error) {
+    db.delete(routes).where(eq(routes.id, routeId)).run();
+    await deleteRouteBlobs(routeId);
+    throw error;
+  }
+
+  return {
+    route,
+    summary: prepared.map((p) => ({
+      filename: p.sourceFilename,
+      pointsOriginal: p.built.series.pointCountOriginal,
+      pointsStored: p.built.series.pointCountStored,
+      droppedOutliers: p.built.droppedOutliers,
+    })),
+  };
+}
+
+/** Adds more GPX files to an existing route and recomputes its aggregates. */
+export async function addTracksToRoute(
+  routeId: string,
+  files: UploadedGpx[],
+): Promise<IngestResult> {
+  const existing = await getRouteById(routeId);
+  if (!existing) throw new ValidationError("That route no longer exists.");
+
+  const totalFiles = existing.tracks.length + files.length;
+  if (totalFiles > MAX_FILES_PER_ROUTE) {
+    throw new ValidationError(
+      `A route can hold ${MAX_FILES_PER_ROUTE} tracks; this would make ${totalFiles}.`,
+    );
+  }
+
+  const prepared = prepareTracks(files);
+  const startIndex = existing.tracks.length;
+
+  const trackRows = prepared.map((p, index) => ({
+    id: generateId(),
+    routeId,
+    name: p.name,
+    sourceFilename: p.sourceFilename,
+    color: TRACK_COLORS[(startIndex + index) % TRACK_COLORS.length],
+    orderIndex: startIndex + index,
+    geometry: p.built.series.geometry,
+    elevations: p.built.series.elevations,
+    distances: p.built.series.distances,
+    timeOffsets: p.built.series.timeOffsets,
+    pointCountOriginal: p.built.series.pointCountOriginal,
+    pointCountStored: p.built.series.pointCountStored,
+    bbox: p.built.bbox,
+    startedAt: p.built.startedAt != null ? new Date(p.built.startedAt) : null,
+    ...p.built.stats,
+  }));
+
+  db.insert(tracks).values(trackRows).run();
+
+  try {
+    await Promise.all(
+      trackRows.map((row, index) => writeTrackGpx(routeId, row.id, prepared[index].xml)),
+    );
+  } catch (error) {
+    for (const row of trackRows) {
+      db.delete(tracks).where(eq(tracks.id, row.id)).run();
+    }
+    throw error;
+  }
+
+  await recomputeRouteAggregates(routeId);
+  const route = await getRouteById(routeId);
+
+  return {
+    route: route as Route,
+    summary: prepared.map((p) => ({
+      filename: p.sourceFilename,
+      pointsOriginal: p.built.series.pointCountOriginal,
+      pointsStored: p.built.series.pointCountStored,
+      droppedOutliers: p.built.droppedOutliers,
+    })),
+  };
+}
+
+/**
+ * Recalculates a route's aggregate stats and bbox from its remaining tracks.
+ * Called after any change to the track list.
+ */
+export async function recomputeRouteAggregates(routeId: string): Promise<void> {
+  const rows = db.select().from(tracks).where(eq(tracks.routeId, routeId)).all();
+
+  if (rows.length === 0) {
+    db.update(routes)
+      .set({
+        distanceM: 0,
+        elevationGainM: 0,
+        elevationLossM: 0,
+        elevationMinM: null,
+        elevationMaxM: null,
+        durationS: null,
+        movingTimeS: null,
+        avgSpeedMps: null,
+        maxSpeedMps: null,
+        bbox: null,
+        startedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(routes.id, routeId))
+      .run();
+    return;
+  }
+
+  const stats = aggregateStats(rows);
+  const boxes = rows.map((r) => r.bbox).filter((b): b is BBox => b != null);
+  const starts = rows
+    .map((r) => r.startedAt?.getTime())
+    .filter((t): t is number => t != null);
+
+  db.update(routes)
+    .set({
+      ...stats,
+      bbox: boxes.length > 0 ? mergeBounds(boxes) : null,
+      startedAt: starts.length > 0 ? new Date(Math.min(...starts)) : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(routes.id, routeId))
+    .run();
+}
+
+export interface UpdateRouteInput {
+  title?: string;
+  description?: string | null;
+  visibility?: Visibility;
+  activityType?: string | null;
+}
+
+/**
+ * Updates route metadata. The slug is deliberately left alone: it may already
+ * have been shared, and changing it would break every existing link.
+ */
+export async function updateRoute(routeId: string, input: UpdateRouteInput): Promise<void> {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+
+  if (input.title !== undefined) {
+    const title = input.title.trim();
+    if (!title) throw new ValidationError("The title cannot be empty.");
+    patch.title = title;
+  }
+  if (input.description !== undefined) patch.description = input.description?.trim() || null;
+  if (input.visibility !== undefined) patch.visibility = input.visibility;
+  if (input.activityType !== undefined) patch.activityType = input.activityType?.trim() || null;
+
+  db.update(routes).set(patch).where(eq(routes.id, routeId)).run();
+}
+
+export async function deleteRoute(routeId: string): Promise<void> {
+  // Tracks and photos cascade via the schema's foreign keys.
+  db.delete(routes).where(eq(routes.id, routeId)).run();
+  await deleteRouteBlobs(routeId);
+}
+
+export async function deleteTrack(routeId: string, trackId: string): Promise<void> {
+  db.delete(tracks).where(and(eq(tracks.id, trackId), eq(tracks.routeId, routeId))).run();
+  await deleteTrackGpx(routeId, trackId);
+  await recomputeRouteAggregates(routeId);
+}
+
+function withTracks(route: Route | undefined): RouteWithTracks | null {
+  if (!route) return null;
+  const rows = db
+    .select()
+    .from(tracks)
+    .where(eq(tracks.routeId, route.id))
+    .orderBy(asc(tracks.orderIndex))
+    .all();
+  return { ...route, tracks: rows };
+}
+
+export async function getRouteBySlug(slug: string): Promise<RouteWithTracks | null> {
+  const route = db.select().from(routes).where(eq(routes.slug, slug)).get();
+  return withTracks(route);
+}
+
+export async function getRouteById(id: string): Promise<RouteWithTracks | null> {
+  const route = db.select().from(routes).where(eq(routes.id, id)).get();
+  return withTracks(route);
+}
+
+/** Homepage gallery: public routes only, newest activity first. */
+export async function listPublicRoutes(): Promise<Route[]> {
+  return db
+    .select()
+    .from(routes)
+    .where(eq(routes.visibility, "public"))
+    .orderBy(desc(routes.startedAt), desc(routes.createdAt))
+    .all();
+}
+
+/** Admin list: everything, including unlisted routes. */
+export async function listAllRoutes(): Promise<Route[]> {
+  return db
+    .select()
+    .from(routes)
+    .orderBy(desc(routes.startedAt), desc(routes.createdAt))
+    .all();
+}
+
+/** Lightweight geometry for gallery thumbnails, without the full series arrays. */
+export async function listRouteThumbnails(
+  routeIds: string[],
+): Promise<Map<string, Array<{ geometry: string; color: string }>>> {
+  const result = new Map<string, Array<{ geometry: string; color: string }>>();
+  if (routeIds.length === 0) return result;
+
+  const rows = db
+    .select({
+      routeId: tracks.routeId,
+      geometry: tracks.geometry,
+      color: tracks.color,
+      orderIndex: tracks.orderIndex,
+    })
+    .from(tracks)
+    .orderBy(asc(tracks.orderIndex))
+    .all();
+
+  const wanted = new Set(routeIds);
+  for (const row of rows) {
+    if (!wanted.has(row.routeId)) continue;
+    const list = result.get(row.routeId) ?? [];
+    list.push({ geometry: row.geometry, color: row.color });
+    result.set(row.routeId, list);
+  }
+  return result;
+}

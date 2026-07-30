@@ -1,0 +1,20 @@
+node_modules
+dist
+.output
+.vinxi
+.solid
+.nitro
+*.log
+
+# Uploaded tracks, photos and the SQLite database never belong in git.
+data/
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+Thumbs.db
+
+# Copied from node_modules at build time by scripts/copy-maplibre-worker.mjs
+public/maplibre/

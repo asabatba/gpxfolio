@@ -1,0 +1,273 @@
+@import "tailwindcss";
+
+/*
+ * Design intent: the map and the route are the content, so the interface stays
+ * quiet — near-neutral surfaces, one warm accent, generous spacing. Both colour
+ * schemes are first-class; the palette is defined once here as CSS variables so
+ * light/dark switch without duplicating component classes.
+ */
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+
+  --color-surface: #ffffff;
+  --color-surface-raised: #f6f7f9;
+  --color-surface-sunken: #eceef1;
+  --color-border-subtle: #e2e5ea;
+  --color-ink: #14171c;
+  --color-ink-muted: #5c6470;
+  --color-accent: #e8590c;
+  --color-accent-ink: #ffffff;
+}
+
+@layer base {
+  :root {
+    --surface: #ffffff;
+    --surface-raised: #f6f7f9;
+    --surface-sunken: #eceef1;
+    --border-subtle: #e2e5ea;
+    --ink: #14171c;
+    --ink-muted: #5c6470;
+    --accent: #d94f08;
+    --shadow-card: 0 1px 2px rgb(20 23 28 / 0.06), 0 4px 12px rgb(20 23 28 / 0.04);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface: #0d1117;
+      --surface-raised: #161b22;
+      --surface-sunken: #010409;
+      --border-subtle: #262c36;
+      --ink: #e6edf3;
+      --ink-muted: #9aa4b2;
+      --accent: #ff7a3d;
+      --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 16px rgb(0 0 0 / 0.3);
+    }
+  }
+
+  html {
+    background-color: var(--surface);
+    color: var(--ink);
+    /* Prevents iOS Safari from inflating text after an orientation change. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    /* Keeps content clear of notches and home indicators on phones. */
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  /* Respect users who ask for less motion; MapLibre animations honour this too. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Numbers in stat tiles line up in columns. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .surface {
+    background-color: var(--surface);
+  }
+  .surface-raised {
+    background-color: var(--surface-raised);
+  }
+  .surface-sunken {
+    background-color: var(--surface-sunken);
+  }
+  .ink {
+    color: var(--ink);
+  }
+  .ink-muted {
+    color: var(--ink-muted);
+  }
+  .border-subtle {
+    border-color: var(--border-subtle);
+  }
+  .accent-text {
+    color: var(--accent);
+  }
+  .accent-bg {
+    background-color: var(--accent);
+  }
+  .card {
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-card);
+  }
+
+  /*
+   * 44px minimum hit target, the size Apple and Google both recommend for
+   * touch. Applied to every button and link that acts as a control.
+   */
+  .tap {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 44px;
+    padding-inline: 1rem;
+    border-radius: 0.625rem;
+    font-weight: 550;
+    font-size: 0.9375rem;
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      opacity 120ms ease;
+  }
+  .btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background-color: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+  .btn-secondary {
+    background-color: var(--surface-raised);
+    color: var(--ink);
+    border: 1px solid var(--border-subtle);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background-color: var(--surface-sunken);
+  }
+  .btn-ghost {
+    color: var(--ink-muted);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    color: var(--ink);
+    background-color: var(--surface-raised);
+  }
+  .btn-danger {
+    background-color: transparent;
+    color: #e03131;
+    border: 1px solid var(--border-subtle);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background-color: #e0313114;
+  }
+
+  .field {
+    width: 100%;
+    min-height: 44px;
+    padding: 0.625rem 0.75rem;
+    border-radius: 0.625rem;
+    border: 1px solid var(--border-subtle);
+    background-color: var(--surface);
+    color: var(--ink);
+    font-size: 1rem; /* 16px stops iOS Safari zooming on focus. */
+  }
+  .field:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+    border-color: var(--accent);
+  }
+
+  .label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--ink-muted);
+    margin-bottom: 0.375rem;
+    letter-spacing: 0.01em;
+  }
+}
+
+/*
+ * MapLibre's stylesheet assumes a light basemap; these overrides make its
+ * controls and popups match the app in dark mode.
+ */
+/*
+ * Scoped under `.route-map` for the same reason as the sizing rules below:
+ * MapLibre's stylesheet uses identical specificity and loads afterwards, so an
+ * unscoped `.maplibregl-ctrl-group` rule silently loses and the controls stay
+ * white on a dark page.
+ */
+@media (prefers-color-scheme: dark) {
+  .route-map .maplibregl-ctrl-group {
+    background: var(--surface-raised);
+  }
+  .route-map .maplibregl-ctrl-group button + button {
+    border-top-color: var(--border-subtle);
+  }
+  .route-map .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+    filter: invert(1) hue-rotate(180deg);
+  }
+  /*
+   * The compact attribution is styled by `.maplibregl-ctrl-attrib.maplibregl-compact`
+   * — two classes — so overriding it needs three to win on specificity.
+   */
+  .route-map .maplibregl-ctrl-attrib.maplibregl-compact,
+  .route-map .maplibregl-ctrl.maplibregl-ctrl-attrib {
+    background-color: rgb(13 17 23 / 0.8);
+    color: var(--ink-muted);
+  }
+  .route-map .maplibregl-ctrl-attrib a {
+    color: var(--ink-muted);
+  }
+  .route-map .maplibregl-ctrl-attrib-button {
+    filter: invert(1) hue-rotate(180deg);
+  }
+  /* The scale bar is a black-bordered box by default: invisible on dark. */
+  .route-map .maplibregl-ctrl-scale {
+    background: rgb(13 17 23 / 0.75);
+    border-color: var(--ink-muted);
+    color: var(--ink);
+  }
+}
+
+/* The attribution bar is required by the tile providers; just make it discreet. */
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+}
+
+/*
+ * MapLibre's control buttons are 29px — too small to hit reliably with a finger,
+ * and cramped even with a mouse. These selectors are scoped under `.route-map`
+ * (added by RouteMap.tsx) purely to outrank MapLibre's own `.maplibregl-ctrl-group
+ * button` rule, which has the same specificity and is loaded afterwards.
+ */
+.route-map .maplibregl-ctrl-group button {
+  width: 40px;
+  height: 40px;
+}
+.route-map .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  background-size: 20px 20px;
+}
+
+@media (pointer: coarse) {
+  .route-map .maplibregl-ctrl-group button {
+    width: 46px;
+    height: 46px;
+  }
+  .route-map .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+    background-size: 22px 22px;
+  }
+}
