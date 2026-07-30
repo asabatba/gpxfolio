@@ -5,7 +5,7 @@ import { buildTrack } from "./gpx/build";
 import { mergeBounds } from "./gpx/geo";
 import { parseGpx } from "./gpx/parse";
 import { aggregateStats } from "./gpx/stats";
-import { GpxParseError, type BBox, type RouteStats } from "./gpx/types";
+import { GpxParseError, type BBox, type ParsedGpx, type RouteStats } from "./gpx/types";
 import { buildSlug, generateId } from "./ids";
 import { deleteRouteBlobs, deleteTrackGpx, writeTrackGpx } from "./storage";
 
@@ -15,16 +15,24 @@ import { deleteRouteBlobs, deleteTrackGpx, writeTrackGpx } from "./storage";
  * suffix makes an accidental client import obvious.
  */
 
-/** Distinct, colour-blind-friendly line colours, assigned per track in order. */
+/**
+ * Line colours, assigned per track in order.
+ *
+ * Chosen against the OpenHikingMap basemap, which renders its own paths, tracks
+ * and roads in oranges and yellows over green forest and ochre contour lines. An
+ * orange or green track disappears into that; magenta and violet — the
+ * convention on printed topo maps for exactly this reason — stay legible, as do
+ * strong blues. Nothing here is orange, yellow, or mid-green.
+ */
 const TRACK_COLORS = [
-  "#e8590c", // orange
-  "#1c7ed6", // blue
-  "#2f9e44", // green
-  "#ae3ec9", // purple
-  "#e03131", // red
-  "#0c8599", // teal
-  "#f08c00", // amber
-  "#5f3dc4", // indigo
+  "#e5007d", // magenta
+  "#1149c8", // blue
+  "#7c1fd6", // violet
+  "#00868a", // teal
+  "#b3003c", // crimson
+  "#0072b8", // steel blue
+  "#5d3fd3", // indigo
+  "#8b0068", // plum
 ];
 
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -78,7 +86,7 @@ function prepareTracks(files: UploadedGpx[]) {
   for (const file of files) {
     // Parsing every file before any write means a bad file at position 5
     // doesn't leave the first four persisted.
-    let parsed;
+    let parsed: ParsedGpx;
     try {
       parsed = parseGpx(file.xml);
     } catch (error) {

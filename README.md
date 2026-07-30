@@ -17,9 +17,31 @@ file, and an interactive elevation profile linked to the map.
 
 ## Stack
 
-SolidStart (SSR, Node preset) · TypeScript · Tailwind CSS v4 · MapLibre GL v6
-with [OpenFreeMap](https://openfreemap.org) tiles (no API key) · SQLite via
-Drizzle ORM · Vitest.
+SolidStart (SSR, Node preset) · TypeScript · Tailwind CSS v4 · MapLibre GL v6 ·
+SQLite via Drizzle ORM · Vitest. Distances are metric throughout.
+
+### Basemap
+
+OpenHikingMap raster tiles from `tile.openmaps.fr/hiking/{z}/{x}/{y}.png` — OSM
+data rendered with paths, trail waymarks, contour lines and hill shading, which
+is what you want behind a recorded track. No API key.
+
+Two things to know about this choice:
+
+- **It's a community server with no published usage policy** (its root is a
+  default Apache page) and no uptime guarantee. If it becomes unreachable,
+  `RouteMap.tsx` falls back to standard OSM tiles after a few failed requests so
+  routes stay viewable. For anything beyond personal traffic, run your own tile
+  server or switch the source.
+- **Raster tiles have a single rendering, so there is no dark basemap.** The map
+  looks the same in both colour schemes; the app chrome and map controls still
+  follow the system theme.
+
+Zoom 18 is the deepest level served (19 returns 404), so the source declares
+`maxzoom: 18` and MapLibre upscales beyond it. Track colours in
+`src/lib/routes.server.ts` are deliberately magenta/violet/blue — this basemap
+uses orange and yellow for its own paths, so an orange track vanishes into the
+road network.
 
 ## Getting started
 

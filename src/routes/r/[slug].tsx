@@ -6,7 +6,6 @@ import ElevationProfile from "~/components/ElevationProfile";
 import ShareButton from "~/components/ShareButton";
 import SiteHeader from "~/components/SiteHeader";
 import StatsGrid from "~/components/StatsGrid";
-import UnitToggle, { createUnitPreference } from "~/components/UnitToggle";
 import { formatDate, formatDistance, formatElevation } from "~/lib/format";
 import type { RouteStats } from "~/lib/gpx/types";
 import { bboxOrFallback, toTrackView, type HoverPoint } from "~/lib/track-view";
@@ -61,7 +60,6 @@ export default function RoutePage() {
   // route's — which defeats the point of a shareable page.
   const data = createAsync(() => getRoute(params.slug as string), { deferStream: true });
   const [hovered, setHovered] = createSignal<HoverPoint | null>(null);
-  const [units, setUnits] = createUnitPreference();
 
   return (
     <Suspense
@@ -88,8 +86,8 @@ export default function RoutePage() {
         {(route) => {
           const summary = () =>
             [
-              formatDistance(route().stats.distanceM, units()),
-              `${formatElevation(route().stats.elevationGainM, units())} ascent`,
+              formatDistance(route().stats.distanceM),
+              `${formatElevation(route().stats.elevationGainM)} ascent`,
             ].join(" · ");
 
           return (
@@ -107,7 +105,6 @@ export default function RoutePage() {
               </Show>
 
               <SiteHeader siteName={route().siteName}>
-                <UnitToggle units={units} setUnits={setUnits} />
                 <ShareButton title={route().title} />
               </SiteHeader>
 
@@ -150,7 +147,6 @@ export default function RoutePage() {
 
                 <StatsGrid
                   stats={route().stats}
-                  units={units()}
                   activityType={route().activityType}
                   class="mt-4"
                 />
@@ -161,7 +157,6 @@ export default function RoutePage() {
                   </h2>
                   <ElevationProfile
                     tracks={route().tracks}
-                    units={units()}
                     hovered={hovered}
                     setHovered={setHovered}
                   />
@@ -185,7 +180,7 @@ export default function RoutePage() {
                               {track.name ?? "Untitled track"}
                             </span>
                             <span class="tabular ink-muted shrink-0 text-sm">
-                              {formatDistance(track.distanceM, units())}
+                              {formatDistance(track.distanceM)}
                             </span>
                           </li>
                         )}

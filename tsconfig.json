@@ -16,7 +16,7 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowJs": true,
-    "baseUrl": ".",
+    // TypeScript 7 removed `baseUrl`; `paths` now resolve relative to this file.
     "paths": {
       "~/*": ["./src/*"]
     }

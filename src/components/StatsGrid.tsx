@@ -5,13 +5,11 @@ import {
   formatElevation,
   formatPace,
   formatSpeed,
-  type UnitSystem,
 } from "~/lib/format";
 import type { RouteStats } from "~/lib/gpx/types";
 
 interface StatsGridProps {
   stats: RouteStats;
-  units: UnitSystem;
   /** Running and hiking read better as pace; riding as speed. */
   activityType?: string | null;
   class?: string;
@@ -32,10 +30,10 @@ interface Tile {
 }
 
 function buildTiles(props: StatsGridProps): Tile[] {
-  const { stats, units } = props;
+  const { stats } = props;
   const tiles: Tile[] = [
-    { label: "Distance", value: formatDistance(stats.distanceM, units), primary: true },
-    { label: "Ascent", value: formatElevation(stats.elevationGainM, units), primary: true },
+    { label: "Distance", value: formatDistance(stats.distanceM), primary: true },
+    { label: "Ascent", value: formatElevation(stats.elevationGainM), primary: true },
   ];
 
   if (stats.movingTimeS != null) {
@@ -48,22 +46,22 @@ function buildTiles(props: StatsGridProps): Tile[] {
     tiles.push({ label: "Duration", value: formatDuration(stats.durationS), primary: true });
   }
 
-  tiles.push({ label: "Descent", value: formatElevation(stats.elevationLossM, units) });
+  tiles.push({ label: "Descent", value: formatElevation(stats.elevationLossM) });
 
   if (stats.elevationMaxM != null) {
-    tiles.push({ label: "Max elevation", value: formatElevation(stats.elevationMaxM, units) });
+    tiles.push({ label: "Max elevation", value: formatElevation(stats.elevationMaxM) });
   }
 
   if (stats.avgSpeedMps != null) {
     tiles.push(
       prefersPace(props.activityType)
-        ? { label: "Avg pace", value: formatPace(stats.avgSpeedMps, units) }
-        : { label: "Avg speed", value: formatSpeed(stats.avgSpeedMps, units) },
+        ? { label: "Avg pace", value: formatPace(stats.avgSpeedMps) }
+        : { label: "Avg speed", value: formatSpeed(stats.avgSpeedMps) },
     );
   }
 
   if (stats.maxSpeedMps != null && !prefersPace(props.activityType)) {
-    tiles.push({ label: "Max speed", value: formatSpeed(stats.maxSpeedMps, units) });
+    tiles.push({ label: "Max speed", value: formatSpeed(stats.maxSpeedMps) });
   }
 
   // Only worth showing when it differs from moving time.

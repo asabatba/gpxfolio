@@ -1,10 +1,9 @@
 import { createMemo, For, Show, type Setter } from "solid-js";
-import { formatDistance, formatDuration, formatElevation, type UnitSystem } from "~/lib/format";
+import { formatDistance, formatDuration, formatElevation } from "~/lib/format";
 import type { HoverPoint, TrackView } from "~/lib/track-view";
 
 interface ElevationProfileProps {
   tracks: TrackView[];
-  units: UnitSystem;
   hovered: () => HoverPoint | null;
   setHovered: Setter<HoverPoint | null>;
 }
@@ -254,9 +253,7 @@ export default function ElevationProfile(props: ElevationProfileProps) {
                   fill="var(--ink-muted)"
                   style={{ "font-size": "11px" }}
                 >
-                  {Math.round(
-                    props.units === "imperial" ? elevation / 0.3048 : elevation,
-                  ).toLocaleString()}
+                  {Math.round(elevation).toLocaleString()}
                 </text>
               </g>
             )}
@@ -281,7 +278,7 @@ export default function ElevationProfile(props: ElevationProfileProps) {
                 fill="var(--ink-muted)"
                 style={{ "font-size": "11px" }}
               >
-                {formatDistance(distance, props.units)}
+                {formatDistance(distance)}
               </text>
             )}
           </For>
@@ -327,12 +324,12 @@ export default function ElevationProfile(props: ElevationProfileProps) {
               <>
                 <span>
                   <span class="ink-muted">at </span>
-                  {formatDistance(point().distanceM, props.units)}
+                  {formatDistance(point().distanceM)}
                 </span>
                 <Show when={point().elevationM != null}>
                   <span>
                     <span class="ink-muted">elev </span>
-                    {formatElevation(point().elevationM as number, props.units)}
+                    {formatElevation(point().elevationM as number)}
                   </span>
                 </Show>
                 <Show when={point().timeOffsetS != null}>

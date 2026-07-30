@@ -27,11 +27,33 @@ interface RouteMapProps {
   class?: string;
 }
 
-/** OpenFreeMap serves these styles free and without an API key. */
-const STYLE_LIGHT = "https://tiles.openfreemap.org/styles/bright";
-// `positron` looks like a dark style by name but its background is rgb(242,243,240) —
-// it's the pale grey one. `dark` is the actual dark basemap.
-const STYLE_DARK = "https://tiles.openfreemap.org/styles/dark";
+/**
+ * OpenHikingMap raster tiles: OSM data rendered with paths, trail waymarks and
+ * contour lines, which is what a route page actually wants behind a track.
+ *
+ * Raster rather than vector, so there is a single rendering and no dark variant —
+ * the basemap looks the same in both colour schemes, while the app chrome and the
+ * map controls still follow the system theme (see app.css).
+ *
+ * Zoom range verified against the server: z18 is the deepest level served (z19
+ * returns 404). `maxzoom: 18` makes MapLibre upscale past that rather than
+ * request tiles that don't exist.
+ */
+const HIKING_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {
+    hiking: {
+      type: "raster",
+      tiles: ["https://tile.openmaps.fr/hiking/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 18,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &middot; tiles <a href="https://tile.openmaps.fr" target="_blank" rel="noopener">openmaps.fr</a>',
+    },
+  },
+  layers: [{ id: "hiking", type: "raster", source: "hiking" }],
+};
 
 /**
  * MapLibre works out its worker's URL at runtime by rewriting its own module
@@ -44,13 +66,10 @@ const STYLE_DARK = "https://tiles.openfreemap.org/styles/dark";
  */
 setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
 
-function prefersDark(): boolean {
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
-}
-
 /**
- * Fallback style used when OpenFreeMap can't be reached, so the route is still
- * visible on a plain OSM raster basemap rather than an empty grey box.
+ * Fallback used when the hiking tiles can't be reached. openmaps.fr is a
+ * community server with no published uptime guarantee, so a route stays viewable
+ * on standard OSM tiles rather than showing an empty grey box.
  */
 const FALLBACK_STYLE: StyleSpecification = {
   version: 8,
@@ -165,7 +184,7 @@ export default function RouteMap(props: RouteMapProps) {
   onMount(() => {
     const instance = new MapLibreMap({
       container,
-      style: prefersDark() ? STYLE_DARK : STYLE_LIGHT,
+      style: HIKING_STYLE,
       center: [0, 0],
       zoom: 1,
       attributionControl: { compact: true },
@@ -189,30 +208,31 @@ export default function RouteMap(props: RouteMapProps) {
       setReady(true);
     });
 
-    // If the vector style fails (offline, provider down), swap in raster OSM.
+    /*
+     * Swap to standard OSM tiles if the hiking server is unreachable. A handful
+     * of failures is tolerated first: a single 404 over the sea or one dropped
+     * request shouldn't change the basemap under the user.
+     */
+    let tileFailures = 0;
     instance.on("error", (event) => {
+      if (instance.getSource("osm")) return; // Already on the fallback.
       const message = String(event.error?.message ?? "");
-      if (message.includes("style") || message.includes("Failed to fetch")) {
-        if (instance.getSource("osm")) return;
-        instance.setStyle(FALLBACK_STYLE);
-      }
+      const isTileProblem =
+        message.includes("Failed to fetch") ||
+        message.includes("NetworkError") ||
+        message.includes("openmaps.fr");
+      if (!isTileProblem) return;
+      if (++tileFailures >= 4) instance.setStyle(FALLBACK_STYLE);
     });
 
-    // Re-add layers after any style change, since setStyle drops them.
+    // setStyle drops all layers, so the tracks are re-added after a style swap.
     instance.on("styledata", () => {
       if (instance.isStyleLoaded() && !instance.getSource(`track-${props.tracks[0]?.id}`)) {
         drawTracks(instance);
       }
     });
 
-    const scheme = window.matchMedia?.("(prefers-color-scheme: dark)");
-    const onSchemeChange = (event: MediaQueryListEvent) => {
-      instance.setStyle(event.matches ? STYLE_DARK : STYLE_LIGHT);
-    };
-    scheme?.addEventListener("change", onSchemeChange);
-
     onCleanup(() => {
-      scheme?.removeEventListener("change", onSchemeChange);
       hoverMarker?.remove();
       instance.remove();
     });
