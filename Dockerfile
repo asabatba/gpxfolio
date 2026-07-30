@@ -5,15 +5,24 @@
 # Two stages: the builder compiles the SolidStart app with pnpm; the runtime
 # image copies out only `.output/`. Nitro's node-server preset bundles every
 # dependency the server needs directly into `.output/server/node_modules` —
-# including its own copy of better-sqlite3 with a prebuilt native binary for
-# every platform it ships (linuxmusl-x64 among them, verified against the
-# installed package) — so the runtime stage never needs its own node_modules
-# and Alpine needs no compiler toolchain.
+# including its own copy of better-sqlite3 — so the runtime stage never needs
+# its own node_modules and stays free of the build toolchain below.
 
-FROM node:22-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 
-# Node 22 ships corepack; enabling it makes `pnpm` resolve to the exact
+# better-sqlite3 ships prebuilt binaries (including one for linuxmusl-x64,
+# i.e. this exact image), but it has no install/postinstall script of its
+# own — only a binding.gyp. npm/pnpm's implicit rule for that combination is
+# to run `node-gyp rebuild` at install time regardless of whether a usable
+# prebuild already exists, and Alpine's base image has neither Python nor a
+# compiler, so that step fails outright ("Could not find any Python
+# installation") and aborts the whole install. This toolchain is what
+# node-gyp needs to actually succeed; it's discarded with this stage, so it
+# never reaches the runtime image.
+RUN apk add --no-cache python3 make g++
+
+# Node 24 ships corepack; enabling it makes `pnpm` resolve to the exact
 # version pinned in package.json's "packageManager" field.
 RUN corepack enable
 
@@ -31,7 +40,7 @@ RUN cp scripts/migrate.mjs .output/server/migrate.mjs
 
 # ---------------------------------------------------------------------------
 
-FROM node:22-alpine AS runtime
+FROM node:24-alpine AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production

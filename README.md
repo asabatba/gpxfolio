@@ -100,17 +100,27 @@ data/
 root — `caprover deploy` (or a connected git repo) builds and ships the app
 with no extra config beyond what's below.
 
-**How the image is built.** Two stages: the builder installs with pnpm and runs
-`pnpm build`; the runtime stage copies out only `.output/`. Nitro's node-server
-preset bundles every dependency the server needs directly into
-`.output/server/node_modules` — including its own copy of `better-sqlite3` with
-a prebuilt native binary for `linuxmusl-x64` — so the runtime image needs no
-node_modules of its own and Alpine needs no compiler toolchain. Migrations run
-via `node .output/server/migrate.mjs` (a copy of `scripts/migrate.mjs` placed
-next to the built server at build time, so it can resolve `better-sqlite3` and
-`drizzle-orm` from `.output/server/node_modules` too) on every container start,
-before the server begins accepting traffic — so a schema change shipped in a
-new image is applied automatically on redeploy.
+**How the image is built.** Two stages: the builder installs `python3 make g++`
+(needed to compile `better-sqlite3`'s native binding — see below), installs with
+pnpm, and runs `pnpm build`; the runtime stage copies out only `.output/` and
+carries none of that toolchain. Nitro's node-server preset bundles every
+dependency the server needs directly into `.output/server/node_modules` —
+including a copy of the now-compiled `better-sqlite3` — so the runtime image
+needs no node_modules of its own. Migrations run via `node
+.output/server/migrate.mjs` (a copy of `scripts/migrate.mjs` placed next to the
+built server at build time, so it can resolve `better-sqlite3` and `drizzle-orm`
+from `.output/server/node_modules` too) on every container start, before the
+server begins accepting traffic — so a schema change shipped in a new image is
+applied automatically on redeploy.
+
+`better-sqlite3` ships prebuilt binaries for several platforms, but it has no
+install/postinstall script of its own — only a `binding.gyp` — and npm/pnpm's
+implicit rule for that combination is to run `node-gyp rebuild` at install time
+*regardless* of whether a usable prebuild exists. Alpine's base image has
+neither Python nor a compiler, so that step fails outright unless the toolchain
+is installed first; that's the entire reason the builder stage carries
+`python3 make g++` even though nothing else in the app needs to compile
+anything.
 
 **Before the first deploy, in the CapRover dashboard:**
 
@@ -138,12 +148,12 @@ The container listens on port 80 by default (`ENV PORT=80` in the Dockerfile),
 matching CapRover's default "Container HTTP Port" — no HTTP Settings change
 needed there unless you've customised it.
 
-This Dockerfile setup was written and reasoned through carefully — every claim
-about how Nitro bundles dependencies and reads `PORT`/`HOST` was checked
-against a real local build — but wasn't exercised end to end with `docker
-build`, since Docker wasn't available in the environment it was written in. Run
-`docker build -t gpxfolio .` (or a CapRover deploy, which does the same thing)
-as your first real check before relying on it in production.
+Docker wasn't available in the environment this was written in, so the build
+was never run end to end locally — the `binding.gyp`/Python failure above was
+caught from a real CapRover build log and fixed directly against that error,
+but there's no guarantee it's the only issue a full build will surface. Watch
+the next deploy's build log, or run `docker build -t gpxfolio .` yourself, and
+report back anything else that comes up.
 
 ## Commands
 
