@@ -76,7 +76,9 @@ export const createRouteAction = action(async (formData: FormData) => {
       visibility: visibilityOf(formData),
       files,
     });
-    throw redirect(`/r/${result.route.slug}`);
+    // Straight to editing, not the public page: a freshly created route has no
+    // photos yet, and that's the most likely next step.
+    throw redirect(`/admin/${result.route.id}/edit`);
   } catch (error) {
     if (error instanceof ValidationError) return error;
     throw error;

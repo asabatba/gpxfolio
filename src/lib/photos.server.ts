@@ -1,6 +1,14 @@
+import type { Updateable } from "kysely";
 import sharp from "sharp";
 import { db } from "./db";
-import { photoValues, toPhoto, type Photo, type Track } from "./db/schema";
+import {
+  photoValues,
+  toPhoto,
+  type Photo,
+  type PhotosTable,
+  type PositionSource,
+  type Track,
+} from "./db/schema";
 import { decodePolyline } from "./gpx/encode";
 import { generateId } from "./ids";
 import { readPhotoExif, type PhotoExif } from "./photos/exif";
@@ -98,6 +106,31 @@ async function resizePhoto(
   return { full, thumb, width: info.width, height: info.height };
 }
 
+interface TrackIndex {
+  timedTracks: TimedTrack[];
+  trackCoords: Map<string, Array<[number, number]>>;
+  trackDistances: Map<string, number[]>;
+}
+
+/** Shared indexing of a route's tracks, for matching a capture instant/position against them. */
+function buildTrackIndex(tracks: Track[]): TrackIndex {
+  const timedTracks: TimedTrack[] = tracks.map((t) => ({
+    id: t.id,
+    startedAt: t.startedAt?.getTime() ?? null,
+    timeOffsets: t.timeOffsets,
+    distances: t.distances,
+  }));
+
+  const trackCoords = new Map<string, Array<[number, number]>>();
+  const trackDistances = new Map<string, number[]>();
+  for (const t of tracks) {
+    trackCoords.set(t.id, decodePolyline(t.geometry));
+    trackDistances.set(t.id, t.distances);
+  }
+
+  return { timedTracks, trackCoords, trackDistances };
+}
+
 function nearestAcrossTracks(
   trackCoords: Map<string, Array<[number, number]>>,
   lat: number,
@@ -117,6 +150,7 @@ interface Placement {
   takenAt: Date | null;
   lat: number | null;
   lon: number | null;
+  positionSource: PositionSource | null;
   trackId: string | null;
   distanceAlongM: number | null;
   timeSource: TimeSource;
@@ -165,8 +199,10 @@ function resolvePhotoPlacement(
   let lon = exif.lon;
   let trackId: string | null = null;
   let distanceAlongM: number | null = null;
+  let positionSource: PositionSource | null = null;
 
   if (lat != null && lon != null) {
+    positionSource = "gps";
     const nearest = nearestAcrossTracks(trackCoords, lat, lon);
     if (nearest && nearest.distanceM <= SPATIAL_MATCH_MAX_M) {
       trackId = nearest.trackId;
@@ -180,6 +216,7 @@ function resolvePhotoPlacement(
       if (point) {
         lat = point[0];
         lon = point[1];
+        positionSource = "time-match";
       }
       distanceAlongM = trackDistances.get(match.trackId)?.[match.index] ?? null;
     }
@@ -189,6 +226,7 @@ function resolvePhotoPlacement(
     takenAt: captureUtcMs != null ? new Date(captureUtcMs) : null,
     lat,
     lon,
+    positionSource,
     trackId,
     distanceAlongM,
     timeSource,
@@ -225,19 +263,7 @@ export async function preparePhotos(
     }
   }
 
-  const timedTracks: TimedTrack[] = tracks.map((t) => ({
-    id: t.id,
-    startedAt: t.startedAt?.getTime() ?? null,
-    timeOffsets: t.timeOffsets,
-    distances: t.distances,
-  }));
-
-  const trackCoords = new Map<string, Array<[number, number]>>();
-  const trackDistances = new Map<string, number[]>();
-  for (const t of tracks) {
-    trackCoords.set(t.id, decodePolyline(t.geometry));
-    trackDistances.set(t.id, t.distances);
-  }
+  const { timedTracks, trackCoords, trackDistances } = buildTrackIndex(tracks);
 
   // Parsing/resizing every file before any DB write means a bad file at
   // position 5 doesn't leave the first four persisted.
@@ -307,6 +333,7 @@ export async function addPhotosToRoute(
     takenAt: p.takenAt,
     lat: p.lat,
     lon: p.lon,
+    positionSource: p.positionSource,
     distanceAlongM: p.distanceAlongM,
     width: p.width,
     height: p.height,
@@ -373,13 +400,15 @@ export async function deletePhoto(routeId: string, photoId: string): Promise<voi
 
 /**
  * Manual correction for a batch whose inferred (or absent) offset looks
- * wrong: shifts `takenAt` by a fixed amount. Deliberately does not attempt to
- * re-derive `lat`/`lon`/`distanceAlongM` — once persisted, a photo's position
- * no longer records whether it came from the photo's own GPS tags (which
- * shouldn't move) or a time-based track match (which should), and guessing
- * wrong would silently move a GPS-accurate pin. A shifted `takenAt` still
- * fixes gallery ordering/display immediately; correcting a mis-placed pin
- * after the fact means deleting and re-uploading that photo.
+ * wrong: shifts `takenAt` by a fixed amount.
+ *
+ * `positionSource` records how each photo's position was derived, so this can
+ * do the right thing per photo: a `"gps"` pin came from the photo's own EXIF
+ * tags and must never move from a time-based guess, so only its `takenAt`
+ * shifts. A `"time-match"` pin was itself derived from the old `takenAt`, so
+ * it's now stale — it's re-matched against the route's tracks using the
+ * shifted time, same as at upload. A photo with no resolved position
+ * (`positionSource` null) just gets its `takenAt` shifted, same as before.
  */
 export async function nudgePhotoTimes(
   routeId: string,
@@ -390,20 +419,37 @@ export async function nudgePhotoTimes(
 
   const rows = await db
     .selectFrom("photos")
-    .select(["id", "takenAt"])
+    .select(["id", "takenAt", "positionSource"])
     .where("routeId", "=", routeId)
     .where("id", "in", photoIds)
     .execute();
+
+  const needsRematch = rows.some((row) => row.positionSource === "time-match");
+  let index: TrackIndex | null = null;
+  if (needsRematch) {
+    const route = await getRouteById(routeId);
+    if (route) index = buildTrackIndex(route.tracks);
+  }
 
   const deltaMs = deltaMinutes * 60_000;
   await db.transaction().execute(async (tx) => {
     for (const row of rows) {
       if (row.takenAt == null) continue;
-      await tx
-        .updateTable("photos")
-        .set({ takenAt: row.takenAt + deltaMs })
-        .where("id", "=", row.id)
-        .execute();
+      const takenAt = row.takenAt + deltaMs;
+      const patch: Updateable<PhotosTable> = { takenAt };
+
+      if (row.positionSource === "time-match" && index) {
+        const match = selectTrackForCapture(index.timedTracks, takenAt, TIME_MATCH_TOLERANCE_MS);
+        const point = match ? index.trackCoords.get(match.trackId)?.[match.index] : null;
+        patch.trackId = match?.trackId ?? null;
+        patch.lat = point ? point[0] : null;
+        patch.lon = point ? point[1] : null;
+        patch.distanceAlongM = match
+          ? (index.trackDistances.get(match.trackId)?.[match.index] ?? null)
+          : null;
+      }
+
+      await tx.updateTable("photos").set(patch).where("id", "=", row.id).execute();
     }
   });
 }

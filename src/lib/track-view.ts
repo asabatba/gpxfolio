@@ -1,5 +1,5 @@
+import type { Photo, PositionSource, Track } from "./db/schema";
 import { decodePolyline } from "./gpx/encode";
-import type { Photo, Track } from "./db/schema";
 import type { BBox } from "./gpx/types";
 
 /**
@@ -49,6 +49,12 @@ export interface PhotoView {
   takenAt: number | null;
   lat: number | null;
   lon: number | null;
+  /**
+   * How `lat`/`lon` was derived — `"gps"` pins are fixed from the photo's own
+   * EXIF tags; `"time-match"` pins shift if the photo's time is corrected;
+   * null means no position was resolved at all.
+   */
+  positionSource: PositionSource | null;
   /** Metres from the associated track's start, for the elevation-profile marker. Null if unmatched. */
   distanceAlongM: number | null;
   trackId: string | null;
@@ -65,6 +71,7 @@ export function toPhotoView(photo: Photo, slug: string): PhotoView {
     takenAt: photo.takenAt?.getTime() ?? null,
     lat: photo.lat,
     lon: photo.lon,
+    positionSource: photo.positionSource,
     distanceAlongM: photo.distanceAlongM,
     trackId: photo.trackId,
     width: photo.width,

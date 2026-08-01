@@ -8,10 +8,15 @@ import { formatDateShort, formatDistance, formatElevation } from "~/lib/format";
 const getGallery = query(async () => {
   "use server";
   const { listPublicRoutes, listRouteThumbnails } = await import("~/lib/routes.server");
+  const { isAuthenticated } = await import("~/lib/auth");
   const routes = await listPublicRoutes();
-  const thumbnails = await listRouteThumbnails(routes.map((r) => r.id));
+  const [thumbnails, isAdmin] = await Promise.all([
+    listRouteThumbnails(routes.map((r) => r.id)),
+    isAuthenticated(),
+  ]);
 
   return {
+    isAdmin,
     siteName: process.env.PUBLIC_SITE_NAME ?? "gpxfolio",
     routes: routes.map((route) => ({
       slug: route.slug,
@@ -42,11 +47,7 @@ export default function Home() {
             <Title>{gallery().siteName}</Title>
             <Meta name="description" content={`Routes shared by ${gallery().siteName}.`} />
 
-            <SiteHeader siteName={gallery().siteName}>
-              <A href="/admin" class="btn btn-ghost text-sm">
-                Admin
-              </A>
-            </SiteHeader>
+            <SiteHeader siteName={gallery().siteName} isAdmin={gallery().isAdmin} />
 
             <main class="mx-auto w-full max-w-6xl px-4 pb-16 sm:px-6">
               <div class="py-8 sm:py-12">

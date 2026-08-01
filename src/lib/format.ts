@@ -57,6 +57,12 @@ export function formatDate(date: Date | null | undefined): string {
   });
 }
 
+/** `14:32` — used for the per-photo timestamp in the time-sync UI. */
+export function formatTime(date: Date | null | undefined): string {
+  if (!date) return "";
+  return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
 export function formatDateShort(date: Date | null | undefined): string {
   if (!date) return "";
   return date.toLocaleDateString(undefined, {

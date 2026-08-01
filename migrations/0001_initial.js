@@ -77,6 +77,11 @@ export async function up(db) {
     .addColumn("taken_at", "integer")
     .addColumn("lat", "real")
     .addColumn("lon", "real")
+    // How lat/lon was derived: 'gps' (the photo's own EXIF tags — never
+    // overwritten) or 'time-match' (matched against a track's time span, so
+    // it's re-derived whenever taken_at is corrected). Null for photos with
+    // no resolved position at all.
+    .addColumn("position_source", "text")
     .addColumn("distance_along_m", "real")
     .addColumn("width", "integer")
     .addColumn("height", "integer")

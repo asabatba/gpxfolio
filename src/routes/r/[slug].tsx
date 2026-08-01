@@ -18,12 +18,16 @@ const RouteMap = clientOnly(() => import("~/components/RouteMap"));
 const getRoute = query(async (slug: string) => {
   "use server";
   const { getRouteBySlug } = await import("~/lib/routes.server");
-  const route = await getRouteBySlug(slug);
+  const { isAuthenticated } = await import("~/lib/auth");
+  const [route, isAdmin] = await Promise.all([getRouteBySlug(slug), isAuthenticated()]);
   if (!route) return null;
 
   // Send only what the client draws with — the raw rows carry columns the page
-  // never reads.
+  // never reads. `id` is the exception: it's only sent to an authenticated
+  // admin, who needs it to link to `/admin/[id]/edit`.
   return {
+    id: isAdmin ? route.id : null,
+    isAdmin,
     slug: route.slug,
     title: route.title,
     description: route.description,
@@ -107,7 +111,12 @@ export default function RoutePage() {
                 <Meta name="robots" content="noindex, nofollow" />
               </Show>
 
-              <SiteHeader siteName={route().siteName}>
+              <SiteHeader siteName={route().siteName} isAdmin={route().isAdmin ?? false}>
+                <Show when={route().isAdmin}>
+                  <A href={`/admin/${route().id}/edit`} class="btn btn-secondary text-sm">
+                    Edit
+                  </A>
+                </Show>
                 <ShareButton title={route().title} />
               </SiteHeader>
 

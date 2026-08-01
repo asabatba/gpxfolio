@@ -105,6 +105,14 @@ export interface PhotosTable {
   takenAt: number | null;
   lat: number | null;
   lon: number | null;
+  /**
+   * How `lat`/`lon` was derived. `"gps"` photos carry their own EXIF
+   * coordinates and are never moved by a time correction; `"time-match"`
+   * photos were placed by matching `takenAt` against a track, so their
+   * position is re-derived whenever `takenAt` changes. Null when no position
+   * was resolved at all.
+   */
+  positionSource: PositionSource | null;
   /** Metres from the track start, for placing a marker on the elevation profile. */
   distanceAlongM: number | null;
   width: number | null;
@@ -112,6 +120,8 @@ export interface PhotosTable {
   orderIndex: Generated<number>;
   createdAt: Generated<number>;
 }
+
+export type PositionSource = "gps" | "time-match";
 
 export interface Database {
   routes: RoutesTable;
@@ -162,6 +172,7 @@ export interface Photo {
   takenAt: Date | null;
   lat: number | null;
   lon: number | null;
+  positionSource: PositionSource | null;
   distanceAlongM: number | null;
   width: number | null;
   height: number | null;

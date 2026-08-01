@@ -8,7 +8,7 @@ import {
   useSubmission,
   type RouteDefinition,
 } from "@solidjs/router";
-import { createSignal, For, Show, Suspense } from "solid-js";
+import { createEffect, createSignal, For, Show, Suspense } from "solid-js";
 import SiteHeader from "~/components/SiteHeader";
 import UploadDropzone from "~/components/UploadDropzone";
 import {
@@ -20,7 +20,7 @@ import {
   updatePhotoCaptionAction,
   updateRouteAction,
 } from "~/lib/actions";
-import { formatCount, formatDistance, formatElevation } from "~/lib/format";
+import { formatCount, formatDistance, formatElevation, formatTime } from "~/lib/format";
 import type { AddPhotosResult } from "~/lib/photos.server";
 import { toPhotoView } from "~/lib/track-view";
 
@@ -105,6 +105,20 @@ export default function EditRoute() {
       return next;
     });
   }
+
+  function selectAllPhotos(ids: string[]) {
+    setSelectedPhotos(new Set(ids));
+  }
+
+  // A batch that just landed is the common case for a time correction — start
+  // with all of it selected so "shift time" is one click away, instead of
+  // making the admin check every thumbnail first.
+  createEffect(() => {
+    const result = addPhotosSubmission.result;
+    if (result && !(result instanceof Error)) {
+      selectAllPhotos((result as AddPhotosResult).photos.map((p) => p.id));
+    }
+  });
 
   function confirmRemovePhoto(routeId: string, photoId: string) {
     if (!confirm("Delete this photo?")) return;
@@ -360,47 +374,57 @@ export default function EditRoute() {
 
                 <Show when={route().photos.length > 0}>
                   <div class="mt-4">
-                    <Show when={selectedPhotos().size > 0}>
-                      <div class="card mb-3 flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-xs">
-                        <span class="ink-muted">{selectedPhotos().size} selected</span>
-                        <span class="ink-muted">Shift time:</span>
-                        <button
-                          type="button"
-                          class="btn btn-ghost !min-h-0 px-2 py-1"
-                          onClick={() => applyTimeNudge(route().id, -60)}
-                        >
-                          −1h
-                        </button>
-                        <button
-                          type="button"
-                          class="btn btn-ghost !min-h-0 px-2 py-1"
-                          onClick={() => applyTimeNudge(route().id, -15)}
-                        >
-                          −15m
-                        </button>
-                        <button
-                          type="button"
-                          class="btn btn-ghost !min-h-0 px-2 py-1"
-                          onClick={() => applyTimeNudge(route().id, 15)}
-                        >
-                          +15m
-                        </button>
-                        <button
-                          type="button"
-                          class="btn btn-ghost !min-h-0 px-2 py-1"
-                          onClick={() => applyTimeNudge(route().id, 60)}
-                        >
-                          +1h
-                        </button>
-                        <button
-                          type="button"
-                          class="btn btn-ghost !min-h-0 px-2 py-1"
-                          onClick={() => setSelectedPhotos(new Set())}
-                        >
-                          Clear
-                        </button>
-                      </div>
-                    </Show>
+                    <div class="card mb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg px-3 py-2 text-xs">
+                      <button
+                        type="button"
+                        class="btn btn-ghost !min-h-0 px-2 py-1"
+                        onClick={() => selectAllPhotos(route().photos.map((p) => p.id))}
+                      >
+                        Select all {route().photos.length}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost !min-h-0 px-2 py-1"
+                        disabled={selectedPhotos().size === 0}
+                        onClick={() => setSelectedPhotos(new Set())}
+                      >
+                        Clear
+                      </button>
+                      <span class="ink-muted">{selectedPhotos().size} selected</span>
+                      <span class="ink-muted ml-auto">Shift time:</span>
+                      <button
+                        type="button"
+                        class="btn btn-ghost !min-h-0 px-2 py-1"
+                        disabled={selectedPhotos().size === 0}
+                        onClick={() => applyTimeNudge(route().id, -60)}
+                      >
+                        −1h
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost !min-h-0 px-2 py-1"
+                        disabled={selectedPhotos().size === 0}
+                        onClick={() => applyTimeNudge(route().id, -15)}
+                      >
+                        −15m
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost !min-h-0 px-2 py-1"
+                        disabled={selectedPhotos().size === 0}
+                        onClick={() => applyTimeNudge(route().id, 15)}
+                      >
+                        +15m
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost !min-h-0 px-2 py-1"
+                        disabled={selectedPhotos().size === 0}
+                        onClick={() => applyTimeNudge(route().id, 60)}
+                      >
+                        +1h
+                      </button>
+                    </div>
 
                     <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
                       <For each={route().photos}>
@@ -409,15 +433,26 @@ export default function EditRoute() {
                             <label class="relative block cursor-pointer">
                               <input
                                 type="checkbox"
-                                class="absolute left-1.5 top-1.5 h-4 w-4"
+                                class="absolute left-1.5 top-1.5 z-10 h-4 w-4"
                                 checked={selectedPhotos().has(photo.id)}
                                 onChange={() => togglePhotoSelected(photo.id)}
                               />
+                              <Show when={photo.positionSource === "gps"}>
+                                <span
+                                  class="absolute right-1.5 top-1.5 z-10 rounded-full bg-black/60 px-1.5 py-0.5 text-[0.625rem] font-semibold text-white"
+                                  title="Position from GPS — won't move if this photo's time is shifted"
+                                >
+                                  GPS
+                                </span>
+                              </Show>
                               <img
                                 src={photo.thumbUrl}
                                 alt={photo.caption ?? ""}
                                 class="aspect-square w-full rounded-md object-cover"
                               />
+                              <span class="tabular absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[0.625rem] text-white">
+                                {photo.takenAt ? formatTime(new Date(photo.takenAt)) : "No time"}
+                              </span>
                             </label>
                             <form
                               action={updatePhotoCaptionAction}
