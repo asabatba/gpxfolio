@@ -13,6 +13,7 @@ import Breadcrumbs from "~/components/Breadcrumbs";
 import ConfirmDialog, { type PendingConfirm } from "~/components/ConfirmDialog";
 import SiteHeader from "~/components/SiteHeader";
 import UploadDropzone from "~/components/UploadDropzone";
+import UploadProgress from "~/components/UploadProgress";
 import {
   addPhotosAction,
   addTracksAction,
@@ -23,7 +24,7 @@ import {
   updateRouteAction,
 } from "~/lib/actions";
 import { ACTIVITY_SUGGESTIONS } from "~/lib/activities";
-import { formatCount, formatDistance, formatElevation, formatTime } from "~/lib/format";
+import { formatBytes, formatCount, formatDistance, formatElevation, formatTime } from "~/lib/format";
 import type { AddPhotosResult } from "~/lib/photos.server";
 import { toPhotoView } from "~/lib/track-view";
 
@@ -90,6 +91,7 @@ export default function EditRoute() {
   const removePhoto = useAction(deletePhotoAction);
   const nudgeTimes = useAction(nudgePhotoTimesAction);
   const [photoFileCount, setPhotoFileCount] = createSignal(0);
+  const [photoTotalBytes, setPhotoTotalBytes] = createSignal(0);
   const [selectedPhotos, setSelectedPhotos] = createSignal<Set<string>>(new Set());
   const [pendingConfirm, setPendingConfirm] = createSignal<PendingConfirm | null>(null);
 
@@ -361,7 +363,15 @@ export default function EditRoute() {
                     extensionError="is not a supported image type (JPEG, PNG, or WebP)."
                     buttonLabel="Choose photos"
                     hint={`or drop them here — JPEG, PNG or WebP, up to ${MAX_PHOTOS_PER_UPLOAD} at a time`}
-                    onChange={(files) => setPhotoFileCount(files.length)}
+                    onChange={(files) => {
+                      setPhotoFileCount(files.length);
+                      setPhotoTotalBytes(files.reduce((sum, file) => sum + file.size, 0));
+                    }}
+                  />
+                  <UploadProgress
+                    pending={!!addPhotosSubmission.pending}
+                    totalBytes={photoTotalBytes()}
+                    label={`Uploading ${photoFileCount()} photo${photoFileCount() === 1 ? "" : "s"} (${formatBytes(photoTotalBytes())})…`}
                   />
                   <Show when={addPhotosSubmission.result instanceof Error}>
                     <p role="alert" class="mt-2 text-sm" style={{ color: "#e03131" }}>
