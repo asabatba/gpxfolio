@@ -144,18 +144,10 @@ export default function ElevationProfile(props: ElevationProfileProps) {
     return Array.from({ length: 5 }, (_, i) => (total * i) / 4);
   });
 
-  /** Maps a client x-coordinate to the nearest sample by distance. */
-  function sampleAt(clientX: number): Sample | null {
+  /** Nearest sample to a distance along the route — shared by pointer and keyboard input. */
+  function sampleAtDistance(targetM: number): Sample | null {
     const list = samples();
     if (list.length === 0) return null;
-
-    const rect = svg.getBoundingClientRect();
-    if (rect.width === 0) return null;
-
-    // Convert to viewBox units, then to a distance along the route.
-    const viewX = ((clientX - rect.left) / rect.width) * VIEW_W;
-    const ratio = (viewX - PAD_LEFT) / PLOT_W;
-    const targetM = Math.max(0, Math.min(1, ratio)) * extent().totalM;
 
     // Binary search: the series is sorted by distance and can hold 6000 points
     // per track, so a linear scan on every pointermove would be wasteful.
@@ -174,9 +166,23 @@ export default function ElevationProfile(props: ElevationProfileProps) {
     return candidate;
   }
 
-  function handleMove(event: PointerEvent) {
-    const sample = sampleAt(event.clientX);
-    if (!sample) return;
+  /** Maps a client x-coordinate to the nearest sample by distance. */
+  function sampleAt(clientX: number): Sample | null {
+    const rect = svg.getBoundingClientRect();
+    if (rect.width === 0) return null;
+
+    // Convert to viewBox units, then to a distance along the route.
+    const viewX = ((clientX - rect.left) / rect.width) * VIEW_W;
+    const ratio = (viewX - PAD_LEFT) / PLOT_W;
+    const targetM = Math.max(0, Math.min(1, ratio)) * extent().totalM;
+    return sampleAtDistance(targetM);
+  }
+
+  function setHoveredSample(sample: Sample | null) {
+    if (!sample) {
+      props.setHovered(null);
+      return;
+    }
     props.setHovered({
       trackId: sample.trackId,
       index: sample.index,
@@ -188,6 +194,38 @@ export default function ElevationProfile(props: ElevationProfileProps) {
     });
   }
 
+  function handleMove(event: PointerEvent) {
+    setHoveredSample(sampleAt(event.clientX));
+  }
+
+  // Arrow keys step by 1% of the route's total distance — fine enough to feel
+  // continuous, coarse enough to cross a long route in a reasonable number of
+  // presses. Home/End jump to the very start/finish.
+  function handleKeyDown(event: KeyboardEvent) {
+    const list = samples();
+    if (list.length === 0) return;
+
+    const totalM = extent().totalM;
+    const step = totalM / 100;
+    const current = props.hovered()?.distanceM ?? 0;
+
+    let targetM: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+      targetM = Math.min(totalM, current + step);
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+      targetM = Math.max(0, current - step);
+    } else if (event.key === "Home") {
+      targetM = 0;
+    } else if (event.key === "End") {
+      targetM = totalM;
+    } else {
+      return;
+    }
+
+    event.preventDefault();
+    setHoveredSample(sampleAtDistance(targetM));
+  }
+
   const hoveredSample = createMemo(() => {
     const point = props.hovered();
     if (!point) return null;
@@ -195,6 +233,22 @@ export default function ElevationProfile(props: ElevationProfileProps) {
   });
 
   const hasData = createMemo(() => samples().length > 1);
+
+  /**
+   * `role="slider"` rather than `role="img"`: the profile is a 1-D position
+   * picker along the route (arrow keys move it, a value gets announced),
+   * which is exactly what the slider pattern is for — and `aria-valuetext`
+   * lets that announcement carry both distance and elevation, not just a
+   * bare number.
+   */
+  const valueText = createMemo(() => {
+    const point = props.hovered();
+    const distanceM = point?.distanceM ?? 0;
+    const parts = [`at ${formatDistance(distanceM)}`];
+    const elevationM = point?.elevationM ?? sampleAtDistance(distanceM)?.elevationM;
+    if (elevationM != null) parts.push(`elevation ${formatElevation(elevationM)}`);
+    return parts.join(", ");
+  });
 
   return (
     <Show
@@ -206,13 +260,21 @@ export default function ElevationProfile(props: ElevationProfileProps) {
       }
     >
       <figure class="m-0">
-        <svg
-          ref={svg}
-          viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-          preserveAspectRatio="none"
-          class="block h-[180px] w-full sm:h-[220px]"
-          role="img"
-          aria-label="Elevation profile. Move the pointer across it to trace the route on the map."
+        {/* The interactive/ARIA surface lives on this div, not the `<svg>` it
+            wraps: `<svg>` has no native interactive semantics, so an a11y
+            linter correctly rejects an interactive role placed on it
+            directly (`role="slider"` here — the profile is a 1-D position
+            picker along the route, which the slider pattern models exactly,
+            with `aria-valuetext` carrying both distance and elevation). */}
+        <div
+          tabIndex={hasData() ? 0 : undefined}
+          role="slider"
+          class="block h-[180px] w-full cursor-pointer sm:h-[220px]"
+          aria-label="Elevation profile. Point, drag, or use the arrow keys to trace the route on the map."
+          aria-valuemin={0}
+          aria-valuemax={Math.round(extent().totalM)}
+          aria-valuenow={Math.round(props.hovered()?.distanceM ?? 0)}
+          aria-valuetext={valueText()}
           // touch-action:none is scoped to the plot so dragging here traces the
           // route instead of scrolling, while the rest of the page scrolls
           // normally.
@@ -227,6 +289,15 @@ export default function ElevationProfile(props: ElevationProfileProps) {
           }}
           onPointerUp={() => props.setHovered(null)}
           onPointerLeave={() => props.setHovered(null)}
+          onKeyDown={handleKeyDown}
+          onBlur={() => props.setHovered(null)}
+        >
+        <svg
+          ref={svg}
+          viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+          preserveAspectRatio="none"
+          class="block h-full w-full"
+          aria-hidden="true"
         >
           <defs>
             <linearGradient id="elevation-fill" x1="0" y1="0" x2="0" y2="1">
@@ -308,6 +379,7 @@ export default function ElevationProfile(props: ElevationProfileProps) {
             )}
           </Show>
         </svg>
+        </div>
 
         {/* Readout below the chart rather than a floating tooltip: it never
             covers the line and never runs off the edge on a narrow screen. */}
@@ -316,7 +388,7 @@ export default function ElevationProfile(props: ElevationProfileProps) {
             when={props.hovered()}
             fallback={
               <span class="ink-muted text-xs">
-                Drag across the profile to trace the route on the map.
+                Point, drag, or use the arrow keys to trace the route on the map.
               </span>
             }
           >

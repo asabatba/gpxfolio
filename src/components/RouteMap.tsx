@@ -8,7 +8,8 @@ import {
   setWorkerUrl,
   type StyleSpecification,
 } from "maplibre-gl";
-import { createEffect, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show, type Accessor } from "solid-js";
+import MapSkeleton from "~/components/MapSkeleton";
 import type { BBox } from "~/lib/gpx/types";
 import type { HoverPoint, PhotoView, TrackView } from "~/lib/track-view";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -290,6 +291,9 @@ export default function RouteMap(props: RouteMapProps) {
     // both stylesheets otherwise use the same specificity and MapLibre's loads last.
     <div class={`route-map ${props.class ?? ""}`} style={{ position: "relative" }}>
       <div ref={container} style={{ position: "absolute", inset: "0" }} role="application" aria-label="Route map" />
+      <Show when={!ready()}>
+        <MapSkeleton class="pointer-events-none absolute inset-0" />
+      </Show>
     </div>
   );
 }

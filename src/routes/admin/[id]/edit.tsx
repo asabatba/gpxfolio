@@ -9,6 +9,8 @@ import {
   type RouteDefinition,
 } from "@solidjs/router";
 import { createEffect, createSignal, For, Show, Suspense } from "solid-js";
+import Breadcrumbs from "~/components/Breadcrumbs";
+import ConfirmDialog, { type PendingConfirm } from "~/components/ConfirmDialog";
 import SiteHeader from "~/components/SiteHeader";
 import UploadDropzone from "~/components/UploadDropzone";
 import {
@@ -20,6 +22,7 @@ import {
   updatePhotoCaptionAction,
   updateRouteAction,
 } from "~/lib/actions";
+import { ACTIVITY_SUGGESTIONS } from "~/lib/activities";
 import { formatCount, formatDistance, formatElevation, formatTime } from "~/lib/format";
 import type { AddPhotosResult } from "~/lib/photos.server";
 import { toPhotoView } from "~/lib/track-view";
@@ -88,13 +91,21 @@ export default function EditRoute() {
   const nudgeTimes = useAction(nudgePhotoTimesAction);
   const [photoFileCount, setPhotoFileCount] = createSignal(0);
   const [selectedPhotos, setSelectedPhotos] = createSignal<Set<string>>(new Set());
+  const [pendingConfirm, setPendingConfirm] = createSignal<PendingConfirm | null>(null);
 
   function confirmRemoveTrack(routeId: string, trackId: string, label: string) {
-    if (!confirm(`Remove "${label}" from this route?`)) return;
-    const formData = new FormData();
-    formData.set("routeId", routeId);
-    formData.set("trackId", trackId);
-    void removeTrack(formData);
+    setPendingConfirm({
+      title: "Remove track",
+      message: `Remove "${label}" from this route?`,
+      confirmLabel: "Remove",
+      onConfirm: () => {
+        setPendingConfirm(null);
+        const formData = new FormData();
+        formData.set("routeId", routeId);
+        formData.set("trackId", trackId);
+        void removeTrack(formData);
+      },
+    });
   }
 
   function togglePhotoSelected(id: string) {
@@ -121,11 +132,17 @@ export default function EditRoute() {
   });
 
   function confirmRemovePhoto(routeId: string, photoId: string) {
-    if (!confirm("Delete this photo?")) return;
-    const formData = new FormData();
-    formData.set("routeId", routeId);
-    formData.set("photoId", photoId);
-    void removePhoto(formData);
+    setPendingConfirm({
+      title: "Delete photo",
+      message: "Delete this photo? This can't be undone.",
+      onConfirm: () => {
+        setPendingConfirm(null);
+        const formData = new FormData();
+        formData.set("routeId", routeId);
+        formData.set("photoId", photoId);
+        void removePhoto(formData);
+      },
+    });
   }
 
   function applyTimeNudge(routeId: string, deltaMinutes: number) {
@@ -162,6 +179,10 @@ export default function EditRoute() {
                 Done
               </A>
             </SiteHeader>
+            <Breadcrumbs
+              items={[{ label: "Routes", href: "/admin" }, { label: route().title }, { label: "Edit" }]}
+              class="max-w-2xl"
+            />
 
             <main class="mx-auto w-full max-w-2xl px-4 pb-16 sm:px-6">
               <div class="py-6">
@@ -220,8 +241,14 @@ export default function EditRoute() {
                       name="activityType"
                       class="field"
                       value={route().activityType}
+                      list="activity-suggestions"
                       maxlength="40"
                     />
+                    <datalist id="activity-suggestions">
+                      <For each={ACTIVITY_SUGGESTIONS}>
+                        {(activity) => <option value={activity} />}
+                      </For>
+                    </datalist>
                   </div>
                   <div>
                     <label class="label" for="visibility">
@@ -490,6 +517,8 @@ export default function EditRoute() {
                 </Show>
               </section>
             </main>
+
+            <ConfirmDialog request={pendingConfirm()} onCancel={() => setPendingConfirm(null)} />
           </>
         )}
       </Show>

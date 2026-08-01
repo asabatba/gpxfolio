@@ -3,6 +3,7 @@ import { A, createAsync, query, useParams, type RouteDefinition } from "@solidjs
 import { clientOnly } from "@solidjs/start";
 import { createSignal, For, Show, Suspense } from "solid-js";
 import ElevationProfile from "~/components/ElevationProfile";
+import MapSkeleton from "~/components/MapSkeleton";
 import PhotoGallery from "~/components/PhotoGallery";
 import ShareButton from "~/components/ShareButton";
 import SiteHeader from "~/components/SiteHeader";
@@ -14,6 +15,11 @@ import { bboxOrFallback, toPhotoView, toTrackView, type HoverPoint } from "~/lib
 // MapLibre touches `window` at import time, so it must never be evaluated on the
 // server. Everything else on this page is server-rendered.
 const RouteMap = clientOnly(() => import("~/components/RouteMap"));
+
+// Shared with the `fallback` below so the skeleton occupies exactly the same
+// box as the real map — no layout shift once the client chunk loads.
+const MAP_CLASS =
+  "h-[52vh] max-h-[620px] min-h-[280px] w-full overflow-hidden rounded-xl border border-subtle sm:h-[58dvh]";
 
 const getRoute = query(async (slug: string) => {
   "use server";
@@ -156,7 +162,8 @@ export default function RoutePage() {
                   hovered={hovered}
                   photos={route().photos}
                   onSelectPhoto={setSelectedPhotoId}
-                  class="h-[52vh] max-h-[620px] min-h-[280px] w-full overflow-hidden rounded-xl border border-subtle sm:h-[58dvh]"
+                  class={MAP_CLASS}
+                  fallback={<MapSkeleton class={MAP_CLASS} />}
                 />
 
                 <section class="card mt-4 rounded-xl px-2 py-3 sm:px-4">

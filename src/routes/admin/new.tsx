@@ -1,9 +1,11 @@
 import { Title } from "@solidjs/meta";
 import { A, useSubmission } from "@solidjs/router";
-import { createSignal, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
+import Breadcrumbs from "~/components/Breadcrumbs";
 import SiteHeader from "~/components/SiteHeader";
 import UploadDropzone from "~/components/UploadDropzone";
 import { createRouteAction } from "~/lib/actions";
+import { ACTIVITY_SUGGESTIONS } from "~/lib/activities";
 
 const MAX_FILES = 10;
 const MAX_BYTES = 25 * 1024 * 1024;
@@ -20,6 +22,7 @@ export default function NewRoute() {
           Cancel
         </A>
       </SiteHeader>
+      <Breadcrumbs items={[{ label: "Routes", href: "/admin" }, { label: "New route" }]} class="max-w-2xl" />
 
       <main class="mx-auto w-full max-w-2xl px-4 pb-16 sm:px-6">
         <div class="py-6">
@@ -84,14 +87,7 @@ export default function NewRoute() {
                 maxlength="40"
               />
               <datalist id="activity-suggestions">
-                <option value="Ride" />
-                <option value="Gravel" />
-                <option value="MTB" />
-                <option value="Run" />
-                <option value="Trail" />
-                <option value="Hike" />
-                <option value="Walk" />
-                <option value="Ski" />
+                <For each={ACTIVITY_SUGGESTIONS}>{(activity) => <option value={activity} />}</For>
               </datalist>
             </div>
 

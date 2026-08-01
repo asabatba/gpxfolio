@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
 import { A, createAsync, query, useAction, type RouteDefinition } from "@solidjs/router";
-import { For, Show, Suspense } from "solid-js";
+import { createSignal, For, Show, Suspense } from "solid-js";
+import ConfirmDialog, { type PendingConfirm } from "~/components/ConfirmDialog";
 import SiteHeader from "~/components/SiteHeader";
 import { deleteRouteAction, logoutAction, setVisibilityAction } from "~/lib/actions";
 import { formatDateShort, formatDistance, formatElevation } from "~/lib/format";
@@ -32,6 +33,7 @@ export default function AdminIndex() {
   const routes = createAsync(() => getAdminRoutes());
   const setVisibility = useAction(setVisibilityAction);
   const deleteRoute = useAction(deleteRouteAction);
+  const [pendingConfirm, setPendingConfirm] = createSignal<PendingConfirm | null>(null);
 
   function toggleVisibility(id: string, current: "public" | "unlisted") {
     const formData = new FormData();
@@ -42,10 +44,16 @@ export default function AdminIndex() {
 
   function confirmDelete(id: string, title: string) {
     // Deleting removes the GPX blobs too, so it genuinely cannot be undone.
-    if (!confirm(`Delete "${title}"? This removes its GPX files permanently.`)) return;
-    const formData = new FormData();
-    formData.set("routeId", id);
-    void deleteRoute(formData);
+    setPendingConfirm({
+      title: "Delete route",
+      message: `Delete "${title}"? This removes its GPX files permanently.`,
+      onConfirm: () => {
+        setPendingConfirm(null);
+        const formData = new FormData();
+        formData.set("routeId", id);
+        void deleteRoute(formData);
+      },
+    });
   }
 
   return (
@@ -144,6 +152,8 @@ export default function AdminIndex() {
           </Show>
         </Suspense>
       </main>
+
+      <ConfirmDialog request={pendingConfirm()} onCancel={() => setPendingConfirm(null)} />
     </>
   );
 }
