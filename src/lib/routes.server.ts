@@ -411,10 +411,13 @@ export async function moveTrack(
 
 export interface UpdateTrackInput {
   name?: string | null;
-  color?: string;
 }
 
-/** Renames and/or recolors a track. `color` must come from `TRACK_COLORS`. */
+/**
+ * Renames a track. Colour is deliberately not editable here — it's assigned
+ * automatically from `TRACK_COLORS` at upload time so tracks on a multi-day
+ * route stay visually distinct without an admin having to manage that.
+ */
 export async function updateTrack(
   routeId: string,
   trackId: string,
@@ -422,12 +425,6 @@ export async function updateTrack(
 ): Promise<void> {
   const patch: Updateable<TracksTable> = {};
   if (input.name !== undefined) patch.name = input.name?.trim() || null;
-  if (input.color !== undefined) {
-    if (!TRACK_COLORS.includes(input.color)) {
-      throw new ValidationError("Not a valid track colour.");
-    }
-    patch.color = input.color;
-  }
   if (Object.keys(patch).length === 0) return;
 
   await db

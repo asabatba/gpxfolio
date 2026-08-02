@@ -169,7 +169,6 @@ export const updateTrackAction = action(async (formData: FormData) => {
   try {
     await updateTrack(routeId, String(formData.get("trackId") ?? ""), {
       name: String(formData.get("name") ?? ""),
-      color: String(formData.get("color") ?? ""),
     });
   } catch (error) {
     if (error instanceof ValidationError) return error;

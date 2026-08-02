@@ -28,7 +28,6 @@ import {
 } from "~/lib/actions";
 import { ACTIVITY_SUGGESTIONS } from "~/lib/activities";
 import { formatBytes, formatCount, formatDistance, formatElevation, formatTime } from "~/lib/format";
-import { TRACK_COLORS } from "~/lib/gpx/colors";
 import type { AddPhotosResult } from "~/lib/photos.server";
 import { toPhotoView } from "~/lib/track-view";
 
@@ -365,30 +364,6 @@ export default function EditRoute() {
                             maxlength="120"
                             aria-label="Track name"
                           />
-                          <div
-                            class="flex items-center gap-1"
-                            role="radiogroup"
-                            aria-label="Track colour"
-                          >
-                            <For each={TRACK_COLORS}>
-                              {(color) => (
-                                <label class="tap">
-                                  <input
-                                    type="radio"
-                                    name="color"
-                                    value={color}
-                                    checked={track.color === color}
-                                    class="peer sr-only"
-                                  />
-                                  <span
-                                    class="block h-5 w-5 cursor-pointer rounded-full ring-[var(--ink)] ring-offset-2 ring-offset-[var(--surface)] peer-checked:ring-2"
-                                    style={{ "background-color": color }}
-                                    aria-hidden="true"
-                                  />
-                                </label>
-                              )}
-                            </For>
-                          </div>
                           <button type="submit" class="btn btn-ghost !min-h-0 px-2 py-1 text-xs">
                             Save
                           </button>
