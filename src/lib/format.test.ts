@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { formatDistance, formatDuration, formatElevation, formatPace, formatSpeed } from "./format";
+import {
+  formatDateISO,
+  formatDistance,
+  formatDuration,
+  formatElevation,
+  formatPace,
+  formatSpeed,
+} from "./format";
 
 describe("formatDistance", () => {
   it("shows one decimal under 100 km and none above", () => {
@@ -39,6 +46,17 @@ describe("formatPace", () => {
   it("guards against a zero or negative speed", () => {
     expect(formatPace(0)).toBe("—");
     expect(formatPace(-1)).toBe("—");
+  });
+});
+
+describe("formatDateISO", () => {
+  it("formats as YYYY-MM-DD in UTC", () => {
+    expect(formatDateISO(new Date("2026-08-03T14:32:00Z"))).toBe("2026-08-03");
+  });
+
+  it("handles a missing date", () => {
+    expect(formatDateISO(null)).toBe("");
+    expect(formatDateISO(undefined)).toBe("");
   });
 });
 

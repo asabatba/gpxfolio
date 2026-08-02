@@ -32,6 +32,12 @@ interface RouteMapProps {
   onSelectPhoto?: (id: string) => void;
   /** Hourly weather along a "plan this hike" schedule, from `RoutePlanner`. Redrawn whenever it changes. */
   weatherMarkers?: Accessor<WeatherMarkerView[]>;
+  /**
+   * Ids of tracks the viewer has left checked in the Tracks list. Unchecked
+   * tracks stay in `tracks` (the elevation profile still needs all of them)
+   * but are hidden here, and don't count toward the start/finish pins.
+   */
+  visibleTrackIds: Accessor<Set<string>>;
   class?: string;
 }
 
@@ -73,6 +79,8 @@ export default function RouteMap(props: RouteMapProps) {
   let container!: HTMLDivElement;
   let map: MapLibreMap | undefined;
   let hoverMarker: Marker | undefined;
+  let startMarker: Marker | undefined;
+  let finishMarker: Marker | undefined;
   const photoMarkers: Marker[] = [];
   let weatherMarkers: Marker[] = [];
   let weatherPopup: Popup | undefined;
@@ -178,7 +186,7 @@ export default function RouteMap(props: RouteMapProps) {
 
   /** Adds the source+layers for every track. Re-run whenever the style reloads. */
   function drawTracks(instance: MapLibreMap) {
-    props.tracks.forEach((track, index) => {
+    props.tracks.forEach((track) => {
       if (track.coordinates.length < 2) return;
       const sourceId = `track-${track.id}`;
 
@@ -216,23 +224,43 @@ export default function RouteMap(props: RouteMapProps) {
           "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2.5, 14, 5],
         },
       });
-
-      // Start and finish markers, only for the first and last track so a
-      // multi-day route isn't peppered with dots.
-      const isFirst = index === 0;
-      const isLast = index === props.tracks.length - 1;
-      if (isFirst) {
-        addEndpoint(instance, track.coordinates[0], "#2f9e44", "Start");
-      }
-      if (isLast) {
-        addEndpoint(
-          instance,
-          track.coordinates[track.coordinates.length - 1],
-          "#e03131",
-          "Finish",
-        );
-      }
     });
+
+    applyTrackVisibility(instance);
+  }
+
+  /** Shows/hides each track's layers to match the Tracks list checkboxes. */
+  function applyTrackVisibility(instance: MapLibreMap) {
+    const visible = props.visibleTrackIds();
+    for (const track of props.tracks) {
+      const sourceId = `track-${track.id}`;
+      const visibility = visible.has(track.id) ? "visible" : "none";
+      if (instance.getLayer(sourceId)) instance.setLayoutProperty(sourceId, "visibility", visibility);
+      if (instance.getLayer(`${sourceId}-casing`)) {
+        instance.setLayoutProperty(`${sourceId}-casing`, "visibility", visibility);
+      }
+    }
+  }
+
+  /**
+   * Start pin on the first visible track, finish on the last — recomputed
+   * whenever a track is toggled, not fixed to the overall route's ends, so
+   * isolating one stage pins that stage's own start/finish.
+   */
+  function updateEndpointMarkers(instance: MapLibreMap) {
+    startMarker?.remove();
+    finishMarker?.remove();
+    startMarker = undefined;
+    finishMarker = undefined;
+
+    const visible = props.visibleTrackIds();
+    const shown = props.tracks.filter((t) => visible.has(t.id) && t.coordinates.length >= 2);
+    if (shown.length === 0) return;
+
+    const first = shown[0];
+    const last = shown[shown.length - 1];
+    startMarker = addEndpoint(instance, first.coordinates[0], "#2f9e44", "Start");
+    finishMarker = addEndpoint(instance, last.coordinates[last.coordinates.length - 1], "#e03131", "Finish");
   }
 
   function addEndpoint(
@@ -240,11 +268,11 @@ export default function RouteMap(props: RouteMapProps) {
     coord: [number, number],
     color: string,
     label: string,
-  ) {
+  ): Marker {
     const el = document.createElement("div");
     el.setAttribute("aria-label", label);
     el.style.cssText = `width:14px;height:14px;border-radius:50%;background:${color};border:2.5px solid #fff;box-shadow:0 0 0 1px rgb(0 0 0 / 0.25);`;
-    new Marker({ element: el }).setLngLat(coord).addTo(instance);
+    return new Marker({ element: el }).setLngLat(coord).addTo(instance);
   }
 
   function fitToRoute(instance: MapLibreMap) {
@@ -289,6 +317,7 @@ export default function RouteMap(props: RouteMapProps) {
 
     instance.on("load", () => {
       drawTracks(instance);
+      updateEndpointMarkers(instance);
       fitToRoute(instance);
       drawPhotoPins(instance);
       setReady(true);
@@ -331,6 +360,8 @@ export default function RouteMap(props: RouteMapProps) {
 
     onCleanup(() => {
       hoverMarker?.remove();
+      startMarker?.remove();
+      finishMarker?.remove();
       photoMarkers.forEach((marker) => {
         marker.remove();
       });
@@ -340,6 +371,16 @@ export default function RouteMap(props: RouteMapProps) {
       weatherPopup?.remove();
       instance.remove();
     });
+  });
+
+  // Re-syncs layer visibility and the start/finish pins whenever a track is
+  // toggled in the Tracks list.
+  createEffect(() => {
+    props.visibleTrackIds();
+    const instance = map;
+    if (!instance || !ready()) return;
+    applyTrackVisibility(instance);
+    updateEndpointMarkers(instance);
   });
 
   // Redrawn whenever the plan panel's schedule/weather changes.

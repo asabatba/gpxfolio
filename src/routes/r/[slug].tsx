@@ -9,7 +9,7 @@ import RoutePlanner, { type PlanState } from "~/components/RoutePlanner";
 import ShareButton from "~/components/ShareButton";
 import SiteHeader from "~/components/SiteHeader";
 import StatsGrid from "~/components/StatsGrid";
-import { formatDate, formatDistance, formatElevation } from "~/lib/format";
+import { formatDate, formatDateISO, formatDistance, formatElevation } from "~/lib/format";
 import type { RouteStats } from "~/lib/gpx/types";
 import { bboxOrFallback, toPhotoView, toTrackView, type HoverPoint } from "~/lib/track-view";
 
@@ -76,6 +76,27 @@ export default function RoutePage() {
   const [selectedPhotoId, setSelectedPhotoId] = createSignal<string | null>(null);
   const [plan, setPlan] = createSignal<PlanState | null>(null);
 
+  // Which stage's planner is expanded — at most one, so the map only ever
+  // shows one stage's weather markers at a time.
+  const [openStageId, setOpenStageId] = createSignal<string | null>(null);
+  function toggleStage(trackId: string) {
+    setPlan(null); // Drop the previous stage's markers immediately, not just when the new one computes its own.
+    setOpenStageId((current) => (current === trackId ? null : trackId));
+  }
+
+  // Tracks unchecked in the Tracks list — empty by default, so every track
+  // starts visible. Kept as "hidden" rather than "visible" so a freshly
+  // loaded route doesn't need to know its own track ids up front.
+  const [hiddenTrackIds, setHiddenTrackIds] = createSignal<Set<string>>(new Set());
+  function toggleTrackVisible(trackId: string) {
+    setHiddenTrackIds((current) => {
+      const next = new Set(current);
+      if (next.has(trackId)) next.delete(trackId);
+      else next.add(trackId);
+      return next;
+    });
+  }
+
   return (
     <Suspense
       fallback={
@@ -105,12 +126,20 @@ export default function RoutePage() {
               `${formatElevation(route().stats.elevationGainM)} ascent`,
             ].join(" · ");
 
-          // Replanning needs a single track with recorded timestamps to rescale —
-          // see RoutePlanner's docs for why multi-track (multi-day) routes are
-          // out of scope for now.
-          const plannableTrack = createMemo(() => {
-            const tracks = route().tracks;
-            return tracks.length === 1 && tracks[0].timeOffsets ? tracks[0] : null;
+          // Every track with recorded timestamps gets its own planner, stacked
+          // in track order. A single-track route ends up with exactly one,
+          // labelled the same generic way it always has been.
+          const plannableTracks = createMemo(() =>
+            route().tracks.filter((track) => track.timeOffsets && track.timeOffsets.length >= 2),
+          );
+
+          const visibleTrackIds = createMemo(() => {
+            const hidden = hiddenTrackIds();
+            return new Set(
+              route()
+                .tracks.filter((track) => !hidden.has(track.id))
+                .map((track) => track.id),
+            );
           });
 
           const elevationProfilePlan = () => {
@@ -169,9 +198,21 @@ export default function RoutePage() {
                   </Show>
                 </div>
 
-                <Show when={plannableTrack()}>
-                  {(track) => <RoutePlanner track={track()} onChange={setPlan} />}
-                </Show>
+                <For each={plannableTracks()}>
+                  {(track) => (
+                    <RoutePlanner
+                      track={track}
+                      label={
+                        plannableTracks().length > 1
+                          ? `Plan ${track.name ?? "this stage"}`
+                          : "Plan this hike for a different day"
+                      }
+                      open={() => openStageId() === track.id}
+                      onToggle={() => toggleStage(track.id)}
+                      onChange={setPlan}
+                    />
+                  )}
+                </For>
 
                 {/* Map first: it's the reason someone opened the link. Sized with
                     dvh so mobile browser chrome doesn't crop it. */}
@@ -182,6 +223,7 @@ export default function RoutePage() {
                   photos={route().photos}
                   onSelectPhoto={setSelectedPhotoId}
                   weatherMarkers={() => plan()?.markers ?? []}
+                  visibleTrackIds={visibleTrackIds}
                   class={MAP_CLASS}
                   fallback={<MapSkeleton class={MAP_CLASS} />}
                 />
@@ -226,6 +268,13 @@ export default function RoutePage() {
                       <For each={route().tracks}>
                         {(track) => (
                           <li class="card flex items-center gap-3 rounded-lg px-3 py-2.5">
+                            <input
+                              type="checkbox"
+                              class="tap h-4 w-4 shrink-0"
+                              checked={!hiddenTrackIds().has(track.id)}
+                              onChange={() => toggleTrackVisible(track.id)}
+                              aria-label={`Show ${track.name ?? "Untitled track"} on the map`}
+                            />
                             <span
                               class="h-3 w-3 shrink-0 rounded-full"
                               style={{ "background-color": track.color }}
@@ -234,8 +283,18 @@ export default function RoutePage() {
                             <span class="min-w-0 flex-1 truncate text-sm font-medium">
                               {track.name ?? "Untitled track"}
                             </span>
-                            <span class="tabular ink-muted shrink-0 text-sm">
-                              {formatDistance(track.distanceM)}
+                            <span class="tabular shrink-0 text-right text-xs leading-tight">
+                              <Show when={track.startedAt}>
+                                {(startedAt) => (
+                                  <span class="ink-muted block">
+                                    {formatDateISO(new Date(startedAt()))}
+                                  </span>
+                                )}
+                              </Show>
+                              <span class="block text-sm">
+                                {formatDistance(track.distanceM)} ·{" "}
+                                {formatElevation(track.elevationGainM)}
+                              </span>
                             </span>
                           </li>
                         )}

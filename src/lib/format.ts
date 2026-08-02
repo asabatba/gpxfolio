@@ -81,6 +81,12 @@ export function formatDateShort(date: Date | null | undefined): string {
   });
 }
 
+/** `2026-08-03` — used for each stage's date in a multi-track route's track list. */
+export function formatDateISO(date: Date | null | undefined): string {
+  if (!date) return "";
+  return date.toISOString().slice(0, 10);
+}
+
 /** `1,234` — used for point counts in the upload summary. */
 export function formatCount(value: number): string {
   return Math.round(value).toLocaleString();

@@ -11,6 +11,7 @@ import {
   type Route,
   type RoutesTable,
   type Track,
+  type TracksTable,
   type Visibility,
 } from "./db/schema";
 import { buildTrack } from "./gpx/build";
@@ -381,6 +382,60 @@ export async function deleteTrack(routeId: string, trackId: string): Promise<voi
     .execute();
   await deleteTrackGpx(routeId, trackId);
   await recomputeRouteAggregates(routeId);
+}
+
+/** Swaps a track with its neighbour in the route's order. A no-op at either end of the list. */
+export async function moveTrack(
+  routeId: string,
+  trackId: string,
+  direction: "up" | "down",
+): Promise<void> {
+  const rows = await db
+    .selectFrom("tracks")
+    .select(["id", "orderIndex"])
+    .where("routeId", "=", routeId)
+    .orderBy("orderIndex", "asc")
+    .execute();
+
+  const index = rows.findIndex((row) => row.id === trackId);
+  const swapWith = direction === "up" ? index - 1 : index + 1;
+  if (index === -1 || swapWith < 0 || swapWith >= rows.length) return;
+
+  const a = rows[index];
+  const b = rows[swapWith];
+  await db.transaction().execute(async (tx) => {
+    await tx.updateTable("tracks").set({ orderIndex: b.orderIndex }).where("id", "=", a.id).execute();
+    await tx.updateTable("tracks").set({ orderIndex: a.orderIndex }).where("id", "=", b.id).execute();
+  });
+}
+
+export interface UpdateTrackInput {
+  name?: string | null;
+  color?: string;
+}
+
+/** Renames and/or recolors a track. `color` must come from `TRACK_COLORS`. */
+export async function updateTrack(
+  routeId: string,
+  trackId: string,
+  input: UpdateTrackInput,
+): Promise<void> {
+  const patch: Updateable<TracksTable> = {};
+  if (input.name !== undefined) patch.name = input.name?.trim() || null;
+  if (input.color !== undefined) {
+    if (!TRACK_COLORS.includes(input.color)) {
+      throw new ValidationError("Not a valid track colour.");
+    }
+    patch.color = input.color;
+  }
+  if (Object.keys(patch).length === 0) return;
+
+  await db
+    .updateTable("tracks")
+    .set(patch)
+    .where("id", "=", trackId)
+    .where("routeId", "=", routeId)
+    .execute();
 }
 
 /** Gallery/pin order: earliest capture first, undated photos last, then upload order. */

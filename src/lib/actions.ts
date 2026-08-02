@@ -147,6 +147,37 @@ export const deleteTrackAction = action(async (formData: FormData) => {
   throw redirect(`/admin/${routeId}/edit`);
 }, "deleteTrack");
 
+export const moveTrackAction = action(async (formData: FormData) => {
+  "use server";
+  const { requireAdmin } = await import("./auth");
+  const { moveTrack } = await import("./routes.server");
+  await requireAdmin();
+
+  const routeId = String(formData.get("routeId") ?? "");
+  const direction = formData.get("direction") === "up" ? "up" : "down";
+  await moveTrack(routeId, String(formData.get("trackId") ?? ""), direction);
+  throw redirect(`/admin/${routeId}/edit`);
+}, "moveTrack");
+
+export const updateTrackAction = action(async (formData: FormData) => {
+  "use server";
+  const { requireAdmin } = await import("./auth");
+  const { updateTrack, ValidationError } = await import("./routes.server");
+  await requireAdmin();
+
+  const routeId = String(formData.get("routeId") ?? "");
+  try {
+    await updateTrack(routeId, String(formData.get("trackId") ?? ""), {
+      name: String(formData.get("name") ?? ""),
+      color: String(formData.get("color") ?? ""),
+    });
+  } catch (error) {
+    if (error instanceof ValidationError) return error;
+    throw error;
+  }
+  throw redirect(`/admin/${routeId}/edit`);
+}, "updateTrack");
+
 export const deleteRouteAction = action(async (formData: FormData) => {
   "use server";
   const { requireAdmin } = await import("./auth");

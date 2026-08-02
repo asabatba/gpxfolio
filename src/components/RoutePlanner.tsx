@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor } from "solid-js";
 import { formatDuration, formatTimeInZone } from "~/lib/format";
 import {
   buildHourlySamples,
@@ -38,6 +38,11 @@ export interface PlanState {
 
 interface RoutePlannerProps {
   track: TrackView;
+  /** Button label. Generic for a single-track route; per-stage on a multi-track one. */
+  label: string;
+  /** Whether this stage's panel is the one currently expanded — owned by the parent so only one stage is open at a time. */
+  open: Accessor<boolean>;
+  onToggle: () => void;
   onChange: (state: PlanState) => void;
 }
 
@@ -63,7 +68,6 @@ export default function RoutePlanner(props: RoutePlannerProps) {
     return timezoneAt(lat, lon);
   });
 
-  const [open, setOpen] = createSignal(false);
   const [start, setStart] = createSignal<number | null>(null);
   const [stretch, setStretch] = createSignal(1);
 
@@ -72,13 +76,15 @@ export default function RoutePlanner(props: RoutePlannerProps) {
     setStretch(1);
   }
 
-  function toggle() {
-    if (!open() && start() == null) reset();
-    setOpen(!open());
+  // Resets to sensible defaults the first time this stage is ever opened;
+  // reopening it later keeps whatever the visitor last set.
+  function handleToggleClick() {
+    if (!props.open() && start() == null) reset();
+    props.onToggle();
   }
 
   const schedule = createMemo<Schedule | null>(() => {
-    if (!open()) return null;
+    if (!props.open()) return null;
     const startMs = start();
     if (startMs == null) return null;
     return buildSchedule(props.track, startMs, stretch());
@@ -163,7 +169,12 @@ export default function RoutePlanner(props: RoutePlannerProps) {
     });
   });
 
+  // Only the currently-open stage is allowed to drive the shared map/elevation
+  // plan state — a closed stage staying silent (rather than reporting a null
+  // schedule) is what lets several `RoutePlanner`s coexist without the last
+  // one to re-render stomping on whichever stage is actually expanded.
   createEffect(() => {
+    if (!props.open()) return;
     props.onChange({ schedule: schedule(), markers: markers(), timeZone: timeZone() });
   });
 
@@ -185,24 +196,24 @@ export default function RoutePlanner(props: RoutePlannerProps) {
       <button
         type="button"
         class="btn btn-secondary tap w-full justify-between"
-        onClick={toggle}
-        aria-expanded={open()}
-        aria-controls="plan-panel"
+        onClick={handleToggleClick}
+        aria-expanded={props.open()}
+        aria-controls={`plan-panel-${props.track.id}`}
       >
-        <span>Plan this hike for a different day</span>
-        <span aria-hidden="true">{open() ? "−" : "+"}</span>
+        <span>{props.label}</span>
+        <span aria-hidden="true">{props.open() ? "−" : "+"}</span>
       </button>
 
-      <Show when={open()}>
-        <div id="plan-panel">
+      <Show when={props.open()}>
+        <div id={`plan-panel-${props.track.id}`}>
           <div class="mt-4 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
             <div>
-              <label class="label" for="plan-start">
+              <label class="label" for={`plan-start-${props.track.id}`}>
                 Start
               </label>
               <input
                 ref={setStartInput}
-                id="plan-start"
+                id={`plan-start-${props.track.id}`}
                 type="datetime-local"
                 class="field"
                 min={toDatetimeLocalValue(Date.now(), timeZone())}
@@ -216,12 +227,12 @@ export default function RoutePlanner(props: RoutePlannerProps) {
             </div>
 
             <div class="min-w-[240px] flex-1">
-              <label class="label" for="plan-stretch">
+              <label class="label" for={`plan-stretch-${props.track.id}`}>
                 Total hike time: {formatDuration(schedule()?.durationS ?? 0)} ({stretch().toFixed(2)}×
                 original pace)
               </label>
               <input
-                id="plan-stretch"
+                id={`plan-stretch-${props.track.id}`}
                 type="range"
                 min={STRETCH_MIN}
                 max={STRETCH_MAX}

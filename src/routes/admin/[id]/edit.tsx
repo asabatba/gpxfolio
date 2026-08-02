@@ -20,12 +20,15 @@ import {
   addTracksAction,
   deletePhotoAction,
   deleteTrackAction,
+  moveTrackAction,
   nudgePhotoTimesAction,
   updatePhotoCaptionAction,
   updateRouteAction,
+  updateTrackAction,
 } from "~/lib/actions";
 import { ACTIVITY_SUGGESTIONS } from "~/lib/activities";
 import { formatBytes, formatCount, formatDistance, formatElevation, formatTime } from "~/lib/format";
+import { TRACK_COLORS } from "~/lib/gpx/colors";
 import type { AddPhotosResult } from "~/lib/photos.server";
 import { toPhotoView } from "~/lib/track-view";
 
@@ -288,38 +291,108 @@ export default function EditRoute() {
                 <h2 class="mb-2 font-semibold">Tracks</h2>
                 <ul class="flex flex-col gap-2">
                   <For each={route().tracks}>
-                    {(track) => (
-                      <li class="card flex items-center gap-3 rounded-lg p-3">
-                        <span
-                          class="h-3 w-3 shrink-0 rounded-full"
-                          style={{ "background-color": track.color }}
-                          aria-hidden="true"
-                        />
-                        <div class="min-w-0 flex-1">
-                          <p class="truncate text-sm font-medium">
-                            {track.name ?? track.sourceFilename}
-                          </p>
-                          <p class="tabular ink-muted text-xs">
-                            {formatDistance(track.distanceM)} ·{" "}
-                            {formatCount(track.pointCountOriginal)} →{" "}
-                            {formatCount(track.pointCountStored)} points
-                          </p>
+                    {(track, index) => (
+                      <li class="card flex flex-col gap-2.5 rounded-lg p-3">
+                        <div class="flex items-center gap-3">
+                          <span
+                            class="h-3 w-3 shrink-0 rounded-full"
+                            style={{ "background-color": track.color }}
+                            aria-hidden="true"
+                          />
+                          <div class="min-w-0 flex-1">
+                            <p class="truncate text-sm font-medium">
+                              {track.name ?? track.sourceFilename}
+                            </p>
+                            <p class="tabular ink-muted text-xs">
+                              {formatDistance(track.distanceM)} ·{" "}
+                              {formatCount(track.pointCountOriginal)} →{" "}
+                              {formatCount(track.pointCountStored)} points
+                            </p>
+                          </div>
+                          <form action={moveTrackAction} method="post" class="flex shrink-0 gap-1">
+                            <input type="hidden" name="routeId" value={route().id} />
+                            <input type="hidden" name="trackId" value={track.id} />
+                            <button
+                              type="submit"
+                              name="direction"
+                              value="up"
+                              class="btn btn-ghost !min-h-[36px] px-2 text-xs"
+                              aria-label={`Move ${track.name ?? track.sourceFilename} up`}
+                              disabled={index() === 0}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="submit"
+                              name="direction"
+                              value="down"
+                              class="btn btn-ghost !min-h-[36px] px-2 text-xs"
+                              aria-label={`Move ${track.name ?? track.sourceFilename} down`}
+                              disabled={index() === route().tracks.length - 1}
+                            >
+                              ↓
+                            </button>
+                          </form>
+                          <Show when={route().tracks.length > 1}>
+                            <button
+                              type="button"
+                              class="btn btn-danger !min-h-[36px] shrink-0 px-2.5 text-xs"
+                              onClick={() =>
+                                confirmRemoveTrack(
+                                  route().id,
+                                  track.id,
+                                  track.name ?? track.sourceFilename,
+                                )
+                              }
+                            >
+                              Remove
+                            </button>
+                          </Show>
                         </div>
-                        <Show when={route().tracks.length > 1}>
-                          <button
-                            type="button"
-                            class="btn btn-danger !min-h-[36px] shrink-0 px-2.5 text-xs"
-                            onClick={() =>
-                              confirmRemoveTrack(
-                                route().id,
-                                track.id,
-                                track.name ?? track.sourceFilename,
-                              )
-                            }
+
+                        <form
+                          action={updateTrackAction}
+                          method="post"
+                          class="flex flex-wrap items-center gap-2 border-t border-subtle pt-2.5"
+                        >
+                          <input type="hidden" name="routeId" value={route().id} />
+                          <input type="hidden" name="trackId" value={track.id} />
+                          <input
+                            name="name"
+                            class="field !min-h-0 min-w-[8rem] flex-1 px-2 py-1 text-xs"
+                            value={track.name ?? ""}
+                            placeholder={track.sourceFilename}
+                            maxlength="120"
+                            aria-label="Track name"
+                          />
+                          <div
+                            class="flex items-center gap-1"
+                            role="radiogroup"
+                            aria-label="Track colour"
                           >
-                            Remove
+                            <For each={TRACK_COLORS}>
+                              {(color) => (
+                                <label class="tap">
+                                  <input
+                                    type="radio"
+                                    name="color"
+                                    value={color}
+                                    checked={track.color === color}
+                                    class="peer sr-only"
+                                  />
+                                  <span
+                                    class="block h-5 w-5 cursor-pointer rounded-full ring-[var(--ink)] ring-offset-2 ring-offset-[var(--surface)] peer-checked:ring-2"
+                                    style={{ "background-color": color }}
+                                    aria-hidden="true"
+                                  />
+                                </label>
+                              )}
+                            </For>
+                          </div>
+                          <button type="submit" class="btn btn-ghost !min-h-0 px-2 py-1 text-xs">
+                            Save
                           </button>
-                        </Show>
+                        </form>
                       </li>
                     )}
                   </For>
