@@ -21,6 +21,7 @@ const getGallery = query(async () => {
     isAdmin,
     siteName: process.env.PUBLIC_SITE_NAME ?? "gpxfolio",
     archiveStats: computeArchiveStats(routes),
+    trackGeometries: [...thumbnails.values()].flatMap((tracks) => tracks.map((t) => t.geometry)),
     routes: routes.map((route) => ({
       slug: route.slug,
       title: route.title,
@@ -60,7 +61,7 @@ export default function Home() {
                 </p>
               </div>
 
-              <ArchiveStats stats={gallery().archiveStats} />
+              <ArchiveStats stats={gallery().archiveStats} trackGeometries={gallery().trackGeometries} />
 
               <Show
                 when={gallery().routes.length > 0}

@@ -1,10 +1,13 @@
 import { A } from "@solidjs/router";
 import { For, Show } from "solid-js";
+import ArchiveMap from "~/components/ArchiveMap";
 import type { ArchiveStats as ArchiveStatsData } from "~/lib/archive-stats";
 import { formatDistance, formatDuration, formatElevation, formatSpeed } from "~/lib/format";
 
 interface ArchiveStatsProps {
   stats: ArchiveStatsData;
+  /** Encoded polylines from every public route's tracks, for the footprint map. */
+  trackGeometries: string[];
 }
 
 interface Tile {
@@ -141,6 +144,18 @@ export default function ArchiveStats(props: ArchiveStatsProps) {
                 </For>
               </tbody>
             </table>
+          </div>
+        </Show>
+
+        <Show when={props.trackGeometries.length > 0}>
+          <div class="mt-4">
+            <p class="ink-muted text-[0.6875rem] font-semibold uppercase tracking-wider">
+              Everywhere I've been
+            </p>
+            <ArchiveMap
+              tracks={props.trackGeometries}
+              class="card mt-2 h-64 w-full rounded-xl sm:h-80"
+            />
           </div>
         </Show>
       </section>
