@@ -198,6 +198,23 @@
     margin-bottom: 0.375rem;
     letter-spacing: 0.01em;
   }
+
+  /* The loading state for a weather marker in `RouteMap.tsx`, before its
+     forecast lookup resolves. */
+  .weather-marker-spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid var(--border-subtle);
+    border-top-color: var(--accent);
+    animation: weather-spin 0.8s linear infinite;
+  }
+  @keyframes weather-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
 }
 
 /*
@@ -239,6 +256,15 @@
   .route-map .maplibregl-ctrl-scale {
     background: rgb(13 17 23 / 0.75);
     border-color: var(--ink-muted);
+    color: var(--ink);
+  }
+  /* The weather-marker popup (see RouteMap.tsx) is plain white by default. */
+  .route-map .weather-popup .maplibregl-popup-tip {
+    border-top-color: var(--surface-raised);
+    border-bottom-color: var(--surface-raised);
+  }
+  .route-map .weather-popup .maplibregl-popup-content {
+    background: var(--surface-raised);
     color: var(--ink);
   }
 }

@@ -1,11 +1,14 @@
 import { createMemo, For, Show, type Setter } from "solid-js";
-import { formatDistance, formatDuration, formatElevation } from "~/lib/format";
+import { formatDistance, formatDuration, formatElevation, formatTimeInZone } from "~/lib/format";
+import type { Schedule } from "~/lib/planning";
 import type { HoverPoint, TrackView } from "~/lib/track-view";
 
 interface ElevationProfileProps {
   tracks: TrackView[];
   hovered: () => HoverPoint | null;
   setHovered: Setter<HoverPoint | null>;
+  /** Set while `RoutePlanner`'s panel is open, to add an arrival-time readout at the hovered point. */
+  plan?: () => { schedule: Schedule; timeZone: string } | null;
 }
 
 /** Internal drawing space; the SVG scales to its container via viewBox. */
@@ -241,12 +244,21 @@ export default function ElevationProfile(props: ElevationProfileProps) {
    * lets that announcement carry both distance and elevation, not just a
    * bare number.
    */
+  /** Estimated arrival time at a distance under the active plan, in the trailhead's own timezone. */
+  const arrivalTextAt = (distanceM: number): string | null => {
+    const plan = props.plan?.();
+    if (!plan) return null;
+    return formatTimeInZone(plan.schedule.arrivalAt(distanceM), plan.timeZone);
+  };
+
   const valueText = createMemo(() => {
     const point = props.hovered();
     const distanceM = point?.distanceM ?? 0;
     const parts = [`at ${formatDistance(distanceM)}`];
     const elevationM = point?.elevationM ?? sampleAtDistance(distanceM)?.elevationM;
     if (elevationM != null) parts.push(`elevation ${formatElevation(elevationM)}`);
+    const arrival = arrivalTextAt(distanceM);
+    if (arrival != null) parts.push(`arriving ${arrival}`);
     return parts.join(", ");
   });
 
@@ -409,6 +421,14 @@ export default function ElevationProfile(props: ElevationProfileProps) {
                     <span class="ink-muted">after </span>
                     {formatDuration(point().timeOffsetS as number)}
                   </span>
+                </Show>
+                <Show when={arrivalTextAt(point().distanceM)}>
+                  {(arrival) => (
+                    <span>
+                      <span class="ink-muted">arriving </span>
+                      {arrival()}
+                    </span>
+                  )}
                 </Show>
               </>
             )}

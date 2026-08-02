@@ -4,14 +4,17 @@ import {
   Map as MapLibreMap,
   Marker,
   NavigationControl,
+  Popup,
   ScaleControl,
   setWorkerUrl,
   type StyleSpecification,
 } from "maplibre-gl";
 import { createEffect, createSignal, onCleanup, onMount, Show, type Accessor } from "solid-js";
 import MapSkeleton from "~/components/MapSkeleton";
+import type { WeatherMarkerView } from "~/components/RoutePlanner";
 import type { BBox } from "~/lib/gpx/types";
 import type { HoverPoint, PhotoView, TrackView } from "~/lib/track-view";
+import { weatherIconMarkup } from "~/lib/weather-icons";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 /**
@@ -28,7 +31,31 @@ interface RouteMapProps {
   /** Photos with a resolved position get a pin; others are omitted. */
   photos?: PhotoView[];
   onSelectPhoto?: (id: string) => void;
+  /** Hourly weather along a "plan this hike" schedule, from `RoutePlanner`. Redrawn whenever it changes. */
+  weatherMarkers?: Accessor<WeatherMarkerView[]>;
   class?: string;
+}
+
+function weatherPopupHtml(marker: WeatherMarkerView): string {
+  const temp = marker.temperatureC != null ? `${Math.round(marker.temperatureC)}°C` : "—";
+  const time = new Date(marker.timestamp).toLocaleString(undefined, {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const details = [
+    marker.windSpeedMps != null ? `${marker.windSpeedMps.toFixed(1)} m/s wind` : null,
+    marker.precipitationMm != null ? `${marker.precipitationMm.toFixed(1)} mm precip` : null,
+  ]
+    .filter((part): part is string => part != null)
+    .join(" · ");
+
+  return (
+    `<div style="font-size:12px;line-height:1.5;"><strong>${temp}</strong> ${time}` +
+    (marker.coarse ? ` <span style="color:var(--ink-muted);">(6-hourly forecast)</span>` : "") +
+    (details ? `<div style="color:var(--ink-muted);">${details}</div>` : "") +
+    `</div>`
+  );
 }
 
 /**
@@ -94,7 +121,63 @@ export default function RouteMap(props: RouteMapProps) {
   let map: MapLibreMap | undefined;
   let hoverMarker: Marker | undefined;
   const photoMarkers: Marker[] = [];
+  let weatherMarkers: Marker[] = [];
+  let weatherPopup: Popup | undefined;
   const [ready, setReady] = createSignal(false);
+
+  /**
+   * Redrawn from scratch on every change rather than diffed — the list is at
+   * most a couple dozen entries (one per hour of a stretched plan), so a full
+   * rebuild is simpler than reconciling and no less correct.
+   *
+   * The popup is managed by hand (open/close on hover, toggle on click)
+   * instead of `Marker.setPopup()`, whose own click-to-toggle would otherwise
+   * fight with the hover handlers below over the same open/closed state.
+   */
+  function drawWeatherMarkers(instance: MapLibreMap) {
+    weatherMarkers.forEach((marker) => {
+      marker.remove();
+    });
+    weatherMarkers = [];
+    weatherPopup?.remove();
+    weatherPopup = undefined;
+
+    for (const point of props.weatherMarkers?.() ?? []) {
+      const el = document.createElement("div");
+      el.style.cssText =
+        "display:flex;align-items:center;gap:2px;padding:2px 7px 2px 3px;border-radius:999px;background:var(--surface);border:1.5px solid var(--border-subtle);box-shadow:0 1px 4px rgb(0 0 0 / 0.25);cursor:default;";
+
+      if (point.status === "loading") {
+        el.innerHTML = `<span class="weather-marker-spinner"></span>`;
+      } else if (point.status === "unavailable") {
+        el.setAttribute("aria-label", "Forecast unavailable");
+        el.innerHTML = `<span style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:var(--ink-muted);font-size:12px;">?</span>`;
+      } else {
+        const temp = point.temperatureC != null ? `${Math.round(point.temperatureC)}°` : "";
+        el.innerHTML = `${weatherIconMarkup(point.symbolCode)}<span style="font-size:12px;font-weight:600;">${temp}</span>`;
+
+        const popup = new Popup({ offset: 16, closeButton: false, className: "weather-popup" }).setHTML(
+          weatherPopupHtml(point),
+        );
+        let popupOpen = false;
+        const open = () => {
+          weatherPopup?.remove();
+          popup.setLngLat([point.lon, point.lat]).addTo(instance);
+          weatherPopup = popup;
+          popupOpen = true;
+        };
+        const close = () => {
+          popup.remove();
+          popupOpen = false;
+        };
+        el.addEventListener("mouseenter", open);
+        el.addEventListener("mouseleave", close);
+        el.addEventListener("click", () => (popupOpen ? close() : open()));
+      }
+
+      weatherMarkers.push(new Marker({ element: el }).setLngLat([point.lon, point.lat]).addTo(instance));
+    }
+  }
 
   /**
    * Photo pins, drawn once on initial load rather than from `styledata` like
@@ -261,8 +344,20 @@ export default function RouteMap(props: RouteMapProps) {
       photoMarkers.forEach((marker) => {
         marker.remove();
       });
+      weatherMarkers.forEach((marker) => {
+        marker.remove();
+      });
+      weatherPopup?.remove();
       instance.remove();
     });
+  });
+
+  // Redrawn whenever the plan panel's schedule/weather changes.
+  createEffect(() => {
+    props.weatherMarkers?.();
+    const instance = map;
+    if (!instance || !ready()) return;
+    drawWeatherMarkers(instance);
   });
 
   // Follow the elevation-profile hover with a marker.

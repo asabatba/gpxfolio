@@ -63,6 +63,15 @@ export function formatTime(date: Date | null | undefined): string {
   return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
+/**
+ * Same as `formatTime`, but forced to a specific IANA zone rather than the
+ * browser's — used for hike planning, which is always in the trailhead's
+ * local time regardless of where the visitor is browsing from.
+ */
+export function formatTimeInZone(ms: number, timeZone: string): string {
+  return new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", timeZone });
+}
+
 export function formatDateShort(date: Date | null | undefined): string {
   if (!date) return "";
   return date.toLocaleDateString(undefined, {

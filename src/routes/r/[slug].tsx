@@ -1,10 +1,11 @@
 import { Title, Meta } from "@solidjs/meta";
 import { A, createAsync, query, useParams, type RouteDefinition } from "@solidjs/router";
 import { clientOnly } from "@solidjs/start";
-import { createSignal, For, Show, Suspense } from "solid-js";
+import { createMemo, createSignal, For, Show, Suspense } from "solid-js";
 import ElevationProfile from "~/components/ElevationProfile";
 import MapSkeleton from "~/components/MapSkeleton";
 import PhotoGallery from "~/components/PhotoGallery";
+import RoutePlanner, { type PlanState } from "~/components/RoutePlanner";
 import ShareButton from "~/components/ShareButton";
 import SiteHeader from "~/components/SiteHeader";
 import StatsGrid from "~/components/StatsGrid";
@@ -73,6 +74,7 @@ export default function RoutePage() {
   const data = createAsync(() => getRoute(params.slug as string), { deferStream: true });
   const [hovered, setHovered] = createSignal<HoverPoint | null>(null);
   const [selectedPhotoId, setSelectedPhotoId] = createSignal<string | null>(null);
+  const [plan, setPlan] = createSignal<PlanState | null>(null);
 
   return (
     <Suspense
@@ -102,6 +104,19 @@ export default function RoutePage() {
               formatDistance(route().stats.distanceM),
               `${formatElevation(route().stats.elevationGainM)} ascent`,
             ].join(" · ");
+
+          // Replanning needs a single track with recorded timestamps to rescale —
+          // see RoutePlanner's docs for why multi-track (multi-day) routes are
+          // out of scope for now.
+          const plannableTrack = createMemo(() => {
+            const tracks = route().tracks;
+            return tracks.length === 1 && tracks[0].timeOffsets ? tracks[0] : null;
+          });
+
+          const elevationProfilePlan = () => {
+            const state = plan();
+            return state?.schedule ? { schedule: state.schedule, timeZone: state.timeZone } : null;
+          };
 
           return (
             <>
@@ -154,6 +169,10 @@ export default function RoutePage() {
                   </Show>
                 </div>
 
+                <Show when={plannableTrack()}>
+                  {(track) => <RoutePlanner track={track()} onChange={setPlan} />}
+                </Show>
+
                 {/* Map first: it's the reason someone opened the link. Sized with
                     dvh so mobile browser chrome doesn't crop it. */}
                 <RouteMap
@@ -162,6 +181,7 @@ export default function RoutePage() {
                   hovered={hovered}
                   photos={route().photos}
                   onSelectPhoto={setSelectedPhotoId}
+                  weatherMarkers={() => plan()?.markers ?? []}
                   class={MAP_CLASS}
                   fallback={<MapSkeleton class={MAP_CLASS} />}
                 />
@@ -174,6 +194,7 @@ export default function RoutePage() {
                     tracks={route().tracks}
                     hovered={hovered}
                     setHovered={setHovered}
+                    plan={elevationProfilePlan}
                   />
                 </section>
 
