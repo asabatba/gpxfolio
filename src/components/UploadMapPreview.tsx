@@ -2,10 +2,13 @@ import { clientOnly } from "@solidjs/start";
 import { createEffect, createSignal, For, Show } from "solid-js";
 import MapSkeleton from "~/components/MapSkeleton";
 import type { PreviewTrack } from "~/components/PreviewMap";
+import { formatDate, formatDistance, formatElevation } from "~/lib/format";
 import { TRACK_COLORS } from "~/lib/gpx/colors";
+import { denoise } from "~/lib/gpx/denoise";
 import { parseGpx } from "~/lib/gpx/parse";
 import { DEFAULT_TOLERANCE_M, simplifyToBudget } from "~/lib/gpx/simplify";
-import { GpxParseError } from "~/lib/gpx/types";
+import { aggregateStats, computeStats } from "~/lib/gpx/stats";
+import { GpxParseError, type RouteStats } from "~/lib/gpx/types";
 
 const PreviewMap = clientOnly(() => import("~/components/PreviewMap"));
 
@@ -21,14 +24,21 @@ interface FileError {
   message: string;
 }
 
+interface PreviewSummary {
+  /** Earliest timestamped point across all tracks, or null if the file(s) carry no times. */
+  date: Date | null;
+  stats: RouteStats;
+}
+
 interface UploadMapPreviewProps {
   files: File[];
 }
 
 /**
  * Parses the selected GPX files entirely in the browser — reusing the same
- * parser and simplifier the server uses — and draws them on a small map, so
- * whoever's uploading can confirm it's the right route before submitting.
+ * parser, denoiser, stats and simplifier the server uses — and shows a quick
+ * summary plus a small map, so whoever's uploading can confirm it's the
+ * right route before submitting.
  *
  * Purely a client-side preview: the server independently re-parses and
  * re-validates every file on submit, and its result is what actually gets
@@ -42,6 +52,7 @@ interface UploadMapPreviewProps {
  */
 export default function UploadMapPreview(props: UploadMapPreviewProps) {
   const [tracks, setTracks] = createSignal<PreviewTrack[]>([]);
+  const [summary, setSummary] = createSignal<PreviewSummary | null>(null);
   const [errors, setErrors] = createSignal<FileError[]>([]);
   const [loading, setLoading] = createSignal(false);
 
@@ -55,6 +66,7 @@ export default function UploadMapPreview(props: UploadMapPreviewProps) {
 
     if (files.length === 0) {
       setTracks([]);
+      setSummary(null);
       setErrors([]);
       setLoading(false);
       return;
@@ -65,6 +77,8 @@ export default function UploadMapPreview(props: UploadMapPreviewProps) {
     (async () => {
       const nextTracks: PreviewTrack[] = [];
       const nextErrors: FileError[] = [];
+      const trackStats: RouteStats[] = [];
+      const starts: number[] = [];
 
       for (const file of files) {
         let xml: string;
@@ -79,16 +93,20 @@ export default function UploadMapPreview(props: UploadMapPreviewProps) {
         try {
           const parsed = parseGpx(xml);
           for (const track of parsed.tracks) {
-            const { indices } = simplifyToBudget(
-              track.points,
-              DEFAULT_TOLERANCE_M,
-              PREVIEW_MAX_POINTS,
-            );
+            // Same pipeline as buildTrack.ts: glitches filtered before stats
+            // are computed and before the line is simplified, so nothing here
+            // drags the numbers or the drawn shape off from what gets saved.
+            const { points } = denoise(track.points);
+            trackStats.push(computeStats(points));
+            const startedAt = points[0]?.time;
+            if (startedAt != null) starts.push(startedAt);
+
+            const { indices } = simplifyToBudget(points, DEFAULT_TOLERANCE_M, PREVIEW_MAX_POINTS);
             nextTracks.push({
               id: `track-${nextTracks.length}`,
               color: TRACK_COLORS[nextTracks.length % TRACK_COLORS.length],
               coordinates: indices.map(
-                (index) => [track.points[index].lon, track.points[index].lat] as [number, number],
+                (index) => [points[index].lon, points[index].lat] as [number, number],
               ),
             });
           }
@@ -103,6 +121,11 @@ export default function UploadMapPreview(props: UploadMapPreviewProps) {
       if (current !== generation) return;
       setTracks(nextTracks);
       setErrors(nextErrors);
+      setSummary(
+        trackStats.length > 0
+          ? { date: starts.length > 0 ? new Date(Math.min(...starts)) : null, stats: aggregateStats(trackStats) }
+          : null,
+      );
       setLoading(false);
     })();
   });
@@ -110,6 +133,15 @@ export default function UploadMapPreview(props: UploadMapPreviewProps) {
   return (
     <Show when={props.files.length > 0}>
       <div>
+        <Show when={summary()}>
+          {(s) => (
+            <p class="tabular ink-muted mb-2 text-xs">
+              {s().date ? `${formatDate(s().date)} · ` : ""}
+              {formatDistance(s().stats.distanceM)} · {formatElevation(s().stats.elevationGainM)}{" "}
+              ascent · {formatElevation(s().stats.elevationLossM)} descent
+            </p>
+          )}
+        </Show>
         <Show when={loading() || tracks().length > 0}>
           <div class="h-[200px] w-full overflow-hidden rounded-xl border border-subtle">
             <Show when={!loading()} fallback={<MapSkeleton class="h-full w-full" />}>
