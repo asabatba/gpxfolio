@@ -13,6 +13,7 @@ import Breadcrumbs from "~/components/Breadcrumbs";
 import ConfirmDialog, { type PendingConfirm } from "~/components/ConfirmDialog";
 import SiteHeader from "~/components/SiteHeader";
 import UploadDropzone from "~/components/UploadDropzone";
+import UploadMapPreview from "~/components/UploadMapPreview";
 import UploadProgress from "~/components/UploadProgress";
 import {
   addPhotosAction,
@@ -85,7 +86,7 @@ export default function EditRoute() {
   const updateSubmission = useSubmission(updateRouteAction);
   const addSubmission = useSubmission(addTracksAction);
   const removeTrack = useAction(deleteTrackAction);
-  const [fileCount, setFileCount] = createSignal(0);
+  const [files, setFiles] = createSignal<File[]>([]);
 
   const addPhotosSubmission = useSubmission(addPhotosAction);
   const removePhoto = useAction(deletePhotoAction);
@@ -333,8 +334,11 @@ export default function EditRoute() {
                     name="files"
                     maxFiles={MAX_FILES}
                     maxBytes={MAX_BYTES}
-                    onChange={(files) => setFileCount(files.length)}
+                    onChange={setFiles}
                   />
+                  <div class="mt-3">
+                    <UploadMapPreview files={files()} />
+                  </div>
                   <Show when={addSubmission.result instanceof Error}>
                     <p role="alert" class="mt-2 text-sm" style={{ color: "#e03131" }}>
                       {(addSubmission.result as Error).message}
@@ -343,7 +347,7 @@ export default function EditRoute() {
                   <button
                     type="submit"
                     class="btn btn-secondary mt-3"
-                    disabled={addSubmission.pending || fileCount() === 0}
+                    disabled={addSubmission.pending || files().length === 0}
                   >
                     {addSubmission.pending ? "Processing…" : "Add tracks"}
                   </button>

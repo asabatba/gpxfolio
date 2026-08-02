@@ -6,13 +6,12 @@ import {
   NavigationControl,
   Popup,
   ScaleControl,
-  setWorkerUrl,
-  type StyleSpecification,
 } from "maplibre-gl";
 import { createEffect, createSignal, onCleanup, onMount, Show, type Accessor } from "solid-js";
 import MapSkeleton from "~/components/MapSkeleton";
 import type { WeatherMarkerView } from "~/components/RoutePlanner";
 import type { BBox } from "~/lib/gpx/types";
+import { FALLBACK_STYLE, HIKING_STYLE } from "~/lib/map-style";
 import type { HoverPoint, PhotoView, TrackView } from "~/lib/track-view";
 import { weatherFamilyLabel, weatherIconMarkup } from "~/lib/weather-icons";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -69,64 +68,6 @@ function weatherAriaLabel(marker: WeatherMarkerView): string {
   const resolution = marker.coarse ? ", 6-hourly forecast" : "";
   return `Forecast: ${temp}, ${weatherFamilyLabel(marker.symbolCode)}, ${time}${resolution}`;
 }
-
-/**
- * OpenHikingMap raster tiles: OSM data rendered with paths, trail waymarks and
- * contour lines, which is what a route page actually wants behind a track.
- *
- * Raster rather than vector, so there is a single rendering and no dark variant —
- * the basemap looks the same in both colour schemes, while the app chrome and the
- * map controls still follow the system theme (see app.css).
- *
- * Zoom range verified against the server: z18 is the deepest level served (z19
- * returns 404). `maxzoom: 18` makes MapLibre upscale past that rather than
- * request tiles that don't exist.
- */
-const HIKING_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {
-    hiking: {
-      type: "raster",
-      tiles: ["https://tile.openmaps.fr/hiking/{z}/{x}/{y}.png"],
-      tileSize: 256,
-      minzoom: 0,
-      maxzoom: 18,
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &middot; tiles <a href="https://tile.openmaps.fr" target="_blank" rel="noopener">openmaps.fr</a>',
-    },
-  },
-  layers: [{ id: "hiking", type: "raster", source: "hiking" }],
-};
-
-/**
- * MapLibre works out its worker's URL at runtime by rewriting its own module
- * URL. Vite can't see through that, so the worker chunk is never emitted and the
- * request lands on the SPA fallback — which returns the HTML page with a 200.
- * The worker then fails to start, and the map never fires `load`: blank map, no
- * track, and no error anywhere. Pointing MapLibre at a copy served from
- * `public/maplibre/` (see scripts/copy-maplibre-worker.mjs) avoids the guesswork
- * entirely, in dev and production alike.
- */
-setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
-
-/**
- * Fallback used when the hiking tiles can't be reached. openmaps.fr is a
- * community server with no published uptime guarantee, so a route stays viewable
- * on standard OSM tiles rather than showing an empty grey box.
- */
-const FALLBACK_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {
-    osm: {
-      type: "raster",
-      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-      tileSize: 256,
-      maxzoom: 19,
-      attribution: "© OpenStreetMap contributors",
-    },
-  },
-  layers: [{ id: "osm", type: "raster", source: "osm" }],
-};
 
 export default function RouteMap(props: RouteMapProps) {
   let container!: HTMLDivElement;

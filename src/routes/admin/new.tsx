@@ -4,6 +4,7 @@ import { createSignal, For, Show } from "solid-js";
 import Breadcrumbs from "~/components/Breadcrumbs";
 import SiteHeader from "~/components/SiteHeader";
 import UploadDropzone from "~/components/UploadDropzone";
+import UploadMapPreview from "~/components/UploadMapPreview";
 import { createRouteAction } from "~/lib/actions";
 import { ACTIVITY_SUGGESTIONS } from "~/lib/activities";
 
@@ -12,7 +13,7 @@ const MAX_BYTES = 25 * 1024 * 1024;
 
 export default function NewRoute() {
   const submission = useSubmission(createRouteAction);
-  const [fileCount, setFileCount] = createSignal(0);
+  const [files, setFiles] = createSignal<File[]>([]);
 
   return (
     <>
@@ -42,8 +43,9 @@ export default function NewRoute() {
             name="files"
             maxFiles={MAX_FILES}
             maxBytes={MAX_BYTES}
-            onChange={(files) => setFileCount(files.length)}
+            onChange={setFiles}
           />
+          <UploadMapPreview files={files()} />
 
           <div>
             <label class="label" for="title">
@@ -112,7 +114,7 @@ export default function NewRoute() {
             <button
               type="submit"
               class="btn btn-primary"
-              disabled={submission.pending || fileCount() === 0}
+              disabled={submission.pending || files().length === 0}
             >
               {submission.pending ? "Processing GPX…" : "Create route"}
             </button>
