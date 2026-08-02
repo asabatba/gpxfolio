@@ -1,11 +1,11 @@
 /**
- * Hand-rolled weather icons, matching the app's dependency-free, hand-rolled
- * SVG aesthetic (see `ElevationProfile.tsx`) rather than pulling in MET
- * Norway's ~100-icon official set. A hiker glancing at a map marker only
- * needs to tell sun/cloud/rain/snow/storm/fog apart, not the full nuance of
- * every `symbol_code` MET returns.
+ * MET Norway's official weather icon set (the same icons yr.no itself uses),
+ * vendored into `public/weather-icons/` from https://github.com/metno/weathericons
+ * (MIT-licensed, see the LICENSE file in that directory). File names match
+ * `symbol_code` exactly, so a forecast's code maps straight to an icon file
+ * with no re-interpretation.
  *
- * Markup is returned as a raw SVG string, not a Solid component: map markers
+ * Markup is returned as a raw HTML string, not a Solid component: map markers
  * are plain DOM elements MapLibre owns directly (see `RouteMap.tsx`), outside
  * Solid's render tree.
  */
@@ -56,72 +56,51 @@ export function weatherFamilyLabel(symbolCode: string | null): string {
   return FAMILY_LABELS[classifySymbol(symbolCode).family];
 }
 
-const SUN = (color: string) =>
-  `<circle cx="12" cy="12" r="5" fill="${color}"/>` +
-  [0, 45, 90, 135, 180, 225, 270, 315]
-    .map((deg) => {
-      const rad = (deg * Math.PI) / 180;
-      const x1 = 12 + Math.cos(rad) * 8;
-      const y1 = 12 + Math.sin(rad) * 8;
-      const x2 = 12 + Math.cos(rad) * 10.5;
-      const y2 = 12 + Math.sin(rad) * 10.5;
-      return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${color}" stroke-width="1.6" stroke-linecap="round"/>`;
-    })
-    .join("");
+/**
+ * Every `symbol_code` the vendored icon set has a file for (the contents of
+ * `public/weather-icons/`, minus the `.svg` extension). MET's API can in
+ * principle return a code outside this list as its set evolves, so lookups
+ * fall back to a neutral "cloudy" icon rather than a broken `<img>`.
+ */
+const KNOWN_SYMBOL_CODES = new Set([
+  "clearsky_day", "clearsky_night", "clearsky_polartwilight",
+  "cloudy",
+  "fair_day", "fair_night", "fair_polartwilight",
+  "fog",
+  "heavyrain", "heavyrainandthunder",
+  "heavyrainshowers_day", "heavyrainshowers_night", "heavyrainshowers_polartwilight",
+  "heavyrainshowersandthunder_day", "heavyrainshowersandthunder_night", "heavyrainshowersandthunder_polartwilight",
+  "heavysleet", "heavysleetandthunder",
+  "heavysleetshowers_day", "heavysleetshowers_night", "heavysleetshowers_polartwilight",
+  "heavysleetshowersandthunder_day", "heavysleetshowersandthunder_night", "heavysleetshowersandthunder_polartwilight",
+  "heavysnow", "heavysnowandthunder",
+  "heavysnowshowers_day", "heavysnowshowers_night", "heavysnowshowers_polartwilight",
+  "heavysnowshowersandthunder_day", "heavysnowshowersandthunder_night", "heavysnowshowersandthunder_polartwilight",
+  "lightrain", "lightrainandthunder",
+  "lightrainshowers_day", "lightrainshowers_night", "lightrainshowers_polartwilight",
+  "lightrainshowersandthunder_day", "lightrainshowersandthunder_night", "lightrainshowersandthunder_polartwilight",
+  "lightsleet", "lightsleetandthunder",
+  "lightsleetshowers_day", "lightsleetshowers_night", "lightsleetshowers_polartwilight",
+  "lightsnow", "lightsnowandthunder",
+  "lightsnowshowers_day", "lightsnowshowers_night", "lightsnowshowers_polartwilight",
+  "lightssleetshowersandthunder_day", "lightssleetshowersandthunder_night", "lightssleetshowersandthunder_polartwilight",
+  "lightssnowshowersandthunder_day", "lightssnowshowersandthunder_night", "lightssnowshowersandthunder_polartwilight",
+  "partlycloudy_day", "partlycloudy_night", "partlycloudy_polartwilight",
+  "rain", "rainandthunder",
+  "rainshowers_day", "rainshowers_night", "rainshowers_polartwilight",
+  "rainshowersandthunder_day", "rainshowersandthunder_night", "rainshowersandthunder_polartwilight",
+  "sleet", "sleetandthunder",
+  "sleetshowers_day", "sleetshowers_night", "sleetshowers_polartwilight",
+  "sleetshowersandthunder_day", "sleetshowersandthunder_night", "sleetshowersandthunder_polartwilight",
+  "snow", "snowandthunder",
+  "snowshowers_day", "snowshowers_night", "snowshowers_polartwilight",
+  "snowshowersandthunder_day", "snowshowersandthunder_night", "snowshowersandthunder_polartwilight",
+]);
 
-const MOON = (color: string) =>
-  `<path d="M15.5 4.5a8 8 0 1 0 4 12.9A9.5 9.5 0 0 1 15.5 4.5Z" fill="${color}"/>`;
-
-const CLOUD = (color: string, y = 13) =>
-  `<path d="M7 ${y + 4}a3.5 3.5 0 0 1 .3-7 4.6 4.6 0 0 1 8.8-1.3A3.8 3.8 0 0 1 17 ${y + 4}Z" fill="${color}"/>`;
-
-const RAINDROPS = (color: string, y: number) =>
-  [6.5, 12, 17.5]
-    .map((x) => `<line x1="${x}" y1="${y}" x2="${x - 1.5}" y2="${y + 4}" stroke="${color}" stroke-width="1.6" stroke-linecap="round"/>`)
-    .join("");
-
-const SNOWFLAKES = (color: string, y: number) =>
-  [6.5, 12, 17.5]
-    .map((x) => `<circle cx="${x}" cy="${y + 2}" r="1.1" fill="${color}"/>`)
-    .join("");
-
-const BOLT = (color: string) =>
-  `<path d="M13 12.5h-3.2l2.4-5.5-5.7 8h3.2l-2.4 5.5Z" fill="${color}"/>`;
+const FALLBACK_ICON = "cloudy";
 
 /** `symbolCode` may be null while a marker's weather is still loading or unavailable. */
 export function weatherIconMarkup(symbolCode: string | null): string {
-  const { family, isNight } = classifySymbol(symbolCode);
-  const sky = isNight ? "#8fa3c7" : "#f2a93b";
-  const cloud = isNight ? "#c7d0e0" : "#9aa4b2";
-  const wet = "#4c8fd9";
-
-  let body: string;
-  switch (family) {
-    case "clear":
-      body = isNight ? MOON(sky) : SUN(sky);
-      break;
-    case "partlyCloudy":
-      body = (isNight ? MOON(sky) : SUN(sky)) + CLOUD(cloud, 14);
-      break;
-    case "cloudy":
-      body = CLOUD(cloud, 12) + CLOUD(cloud, 15);
-      break;
-    case "rain":
-      body = CLOUD(cloud, 9) + RAINDROPS(wet, 15);
-      break;
-    case "sleet":
-      body = CLOUD(cloud, 9) + RAINDROPS(wet, 15) + SNOWFLAKES("#fff", 18);
-      break;
-    case "snow":
-      body = CLOUD(cloud, 9) + SNOWFLAKES("#fff", 16);
-      break;
-    case "thunder":
-      body = CLOUD(cloud, 9) + BOLT("#e8590c");
-      break;
-    case "fog":
-      body = [7, 11, 15].map((y) => `<line x1="4" y1="${y}" x2="20" y2="${y}" stroke="${cloud}" stroke-width="1.8" stroke-linecap="round"/>`).join("");
-      break;
-  }
-
-  return `<svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${body}</svg>`;
+  const icon = symbolCode != null && KNOWN_SYMBOL_CODES.has(symbolCode) ? symbolCode : FALLBACK_ICON;
+  return `<img src="/weather-icons/${icon}.svg" width="20" height="20" alt="" aria-hidden="true">`;
 }
