@@ -187,62 +187,66 @@ export default function RoutePlanner(props: RoutePlannerProps) {
         class="btn btn-secondary tap w-full justify-between"
         onClick={toggle}
         aria-expanded={open()}
+        aria-controls="plan-panel"
       >
         <span>Plan this hike for a different day</span>
         <span aria-hidden="true">{open() ? "−" : "+"}</span>
       </button>
 
       <Show when={open()}>
-        <div class="mt-4 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
-          <div>
-            <label class="label" for="plan-start">
-              Start
-            </label>
-            <input
-              ref={setStartInput}
-              id="plan-start"
-              type="datetime-local"
-              class="field"
-              min={toDatetimeLocalValue(Date.now(), timeZone())}
-              max={toDatetimeLocalValue(maxPlanStart(), timeZone())}
-              onInput={(event) => {
-                const parsed = fromDatetimeLocalValue(event.currentTarget.value, timeZone());
-                if (parsed != null) setStart(parsed);
-              }}
-            />
-            <p class="ink-muted mt-1 text-xs">Local time at the trailhead ({timeZone()})</p>
+        <div id="plan-panel">
+          <div class="mt-4 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
+            <div>
+              <label class="label" for="plan-start">
+                Start
+              </label>
+              <input
+                ref={setStartInput}
+                id="plan-start"
+                type="datetime-local"
+                class="field"
+                min={toDatetimeLocalValue(Date.now(), timeZone())}
+                max={toDatetimeLocalValue(maxPlanStart(), timeZone())}
+                onInput={(event) => {
+                  const parsed = fromDatetimeLocalValue(event.currentTarget.value, timeZone());
+                  if (parsed != null) setStart(parsed);
+                }}
+              />
+              <p class="ink-muted mt-1 text-xs">Local time at the trailhead ({timeZone()})</p>
+            </div>
+
+            <div class="min-w-[240px] flex-1">
+              <label class="label" for="plan-stretch">
+                Total hike time: {formatDuration(schedule()?.durationS ?? 0)} ({stretch().toFixed(2)}×
+                original pace)
+              </label>
+              <input
+                id="plan-stretch"
+                type="range"
+                min={STRETCH_MIN}
+                max={STRETCH_MAX}
+                step={0.05}
+                value={stretch()}
+                aria-valuetext={`${stretch().toFixed(2)}× original pace, ${formatDuration(schedule()?.durationS ?? 0)} total`}
+                style={{ "accent-color": "var(--accent)", width: "100%" }}
+                onInput={(event) => setStretch(Number(event.currentTarget.value))}
+              />
+            </div>
+
+            <button type="button" class="btn btn-ghost" onClick={reset}>
+              Reset
+            </button>
           </div>
 
-          <div class="min-w-[240px] flex-1">
-            <label class="label" for="plan-stretch">
-              Total hike time: {formatDuration(schedule()?.durationS ?? 0)} ({stretch().toFixed(2)}×
-              original pace)
-            </label>
-            <input
-              id="plan-stretch"
-              type="range"
-              min={STRETCH_MIN}
-              max={STRETCH_MAX}
-              step={0.05}
-              value={stretch()}
-              style={{ "accent-color": "var(--accent)", width: "100%" }}
-              onInput={(event) => setStretch(Number(event.currentTarget.value))}
-            />
-          </div>
-
-          <button type="button" class="btn btn-ghost" onClick={reset}>
-            Reset
-          </button>
+          <Show when={schedule()}>
+            {(s) => (
+              <p class="ink-muted mt-3 text-sm" aria-live="polite">
+                Starting {formatTimeInZone(s().startMs, timeZone())}, finishing around{" "}
+                {formatTimeInZone(s().startMs + s().durationS * 1000, timeZone())}.
+              </p>
+            )}
+          </Show>
         </div>
-
-        <Show when={schedule()}>
-          {(s) => (
-            <p class="ink-muted mt-3 text-sm">
-              Starting {formatTimeInZone(s().startMs, timeZone())}, finishing around{" "}
-              {formatTimeInZone(s().startMs + s().durationS * 1000, timeZone())}.
-            </p>
-          )}
-        </Show>
       </Show>
     </section>
   );

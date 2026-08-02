@@ -40,6 +40,22 @@ export function classifySymbol(symbolCode: string | null): { family: WeatherFami
   return { family, isNight };
 }
 
+const FAMILY_LABELS: Record<WeatherFamily, string> = {
+  clear: "clear sky",
+  partlyCloudy: "partly cloudy",
+  cloudy: "cloudy",
+  rain: "rain",
+  sleet: "sleet",
+  snow: "snow",
+  thunder: "thunderstorms",
+  fog: "fog",
+};
+
+/** Plain-text condition, for a marker's `aria-label` — the icon has no text alternative on its own. */
+export function weatherFamilyLabel(symbolCode: string | null): string {
+  return FAMILY_LABELS[classifySymbol(symbolCode).family];
+}
+
 const SUN = (color: string) =>
   `<circle cx="12" cy="12" r="5" fill="${color}"/>` +
   [0, 45, 90, 135, 180, 225, 270, 315]

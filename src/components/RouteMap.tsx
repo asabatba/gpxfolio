@@ -14,7 +14,7 @@ import MapSkeleton from "~/components/MapSkeleton";
 import type { WeatherMarkerView } from "~/components/RoutePlanner";
 import type { BBox } from "~/lib/gpx/types";
 import type { HoverPoint, PhotoView, TrackView } from "~/lib/track-view";
-import { weatherIconMarkup } from "~/lib/weather-icons";
+import { weatherFamilyLabel, weatherIconMarkup } from "~/lib/weather-icons";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 /**
@@ -56,6 +56,18 @@ function weatherPopupHtml(marker: WeatherMarkerView): string {
     (details ? `<div style="color:var(--ink-muted);">${details}</div>` : "") +
     `</div>`
   );
+}
+
+/** Text alternative for a ready marker's icon+temperature, which otherwise has none. */
+function weatherAriaLabel(marker: WeatherMarkerView): string {
+  const temp = marker.temperatureC != null ? `${Math.round(marker.temperatureC)}°C` : "unknown temperature";
+  const time = new Date(marker.timestamp).toLocaleString(undefined, {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const resolution = marker.coarse ? ", 6-hourly forecast" : "";
+  return `Forecast: ${temp}, ${weatherFamilyLabel(marker.symbolCode)}, ${time}${resolution}`;
 }
 
 /**
@@ -142,39 +154,65 @@ export default function RouteMap(props: RouteMapProps) {
     weatherPopup?.remove();
     weatherPopup = undefined;
 
-    for (const point of props.weatherMarkers?.() ?? []) {
-      const el = document.createElement("div");
-      el.style.cssText =
-        "display:flex;align-items:center;gap:2px;padding:2px 7px 2px 3px;border-radius:999px;background:var(--surface);border:1.5px solid var(--border-subtle);box-shadow:0 1px 4px rgb(0 0 0 / 0.25);cursor:default;";
+    const baseStyle =
+      "display:flex;align-items:center;gap:2px;padding:2px 7px 2px 3px;border-radius:999px;background:var(--surface);border:1.5px solid var(--border-subtle);box-shadow:0 1px 4px rgb(0 0 0 / 0.25);";
 
-      if (point.status === "loading") {
-        el.innerHTML = `<span class="weather-marker-spinner"></span>`;
-      } else if (point.status === "unavailable") {
-        el.setAttribute("aria-label", "Forecast unavailable");
-        el.innerHTML = `<span style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:var(--ink-muted);font-size:12px;">?</span>`;
-      } else {
+    for (const point of props.weatherMarkers?.() ?? []) {
+      if (point.status === "ready") {
+        // A real `<button>`, not a `<div>`: it's the only place the wind/precipitation
+        // detail lives, so it needs to be reachable by keyboard and announced by a
+        // screen reader, matching the photo pins' pattern below.
+        const el = document.createElement("button");
+        el.type = "button";
+        el.className = "weather-marker-btn";
+        el.style.cssText = `${baseStyle}cursor:pointer;font:inherit;`;
+        el.setAttribute("aria-label", weatherAriaLabel(point));
         const temp = point.temperatureC != null ? `${Math.round(point.temperatureC)}°` : "";
         el.innerHTML = `${weatherIconMarkup(point.symbolCode)}<span style="font-size:12px;font-weight:600;">${temp}</span>`;
 
-        const popup = new Popup({ offset: 16, closeButton: false, className: "weather-popup" }).setHTML(
-          weatherPopupHtml(point),
-        );
-        let popupOpen = false;
+        // `closeOnClick` is MapLibre's default, but it closes on *any* map
+        // click whose target isn't a descendant of the popup itself — which
+        // includes a click on the very marker button that just opened it (the
+        // popup is a sibling overlay, not an ancestor). Turned off here and
+        // replaced with the map-level listener in `onMount`, which knows to
+        // leave a click on a weather marker alone.
+        const popup = new Popup({
+          offset: 16,
+          closeButton: false,
+          closeOnClick: false,
+          className: "weather-popup",
+        }).setHTML(weatherPopupHtml(point));
+        // `open`/`close` only ever *set* the popup's state — they don't toggle —
+        // so hover, focus and click can all call `open` without a mouse click
+        // (which fires right after `mouseenter` on a real click) immediately
+        // flipping it back closed.
         const open = () => {
-          weatherPopup?.remove();
+          if (weatherPopup !== popup) weatherPopup?.remove();
           popup.setLngLat([point.lon, point.lat]).addTo(instance);
           weatherPopup = popup;
-          popupOpen = true;
         };
         const close = () => {
           popup.remove();
-          popupOpen = false;
+          if (weatherPopup === popup) weatherPopup = undefined;
         };
         el.addEventListener("mouseenter", open);
         el.addEventListener("mouseleave", close);
-        el.addEventListener("click", () => (popupOpen ? close() : open()));
+        el.addEventListener("focus", open);
+        el.addEventListener("blur", close);
+        el.addEventListener("click", open); // Touch has no hover event, so a tap still needs to open it.
+
+        weatherMarkers.push(new Marker({ element: el }).setLngLat([point.lon, point.lat]).addTo(instance));
+        continue;
       }
 
+      const el = document.createElement("div");
+      el.style.cssText = `${baseStyle}cursor:default;`;
+      if (point.status === "loading") {
+        el.innerHTML = `<span class="weather-marker-spinner"></span>`;
+      } else {
+        el.setAttribute("aria-label", "Forecast unavailable");
+        el.innerHTML = `<span style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:var(--ink-muted);font-size:12px;">?</span>`;
+      }
       weatherMarkers.push(new Marker({ element: el }).setLngLat([point.lon, point.lat]).addTo(instance));
     }
   }
@@ -337,6 +375,17 @@ export default function RouteMap(props: RouteMapProps) {
       if (instance.isStyleLoaded() && !instance.getSource(`track-${props.tracks[0]?.id}`)) {
         drawTracks(instance);
       }
+    });
+
+    // Closes a hover/focus/tap-opened weather popup on a click anywhere else
+    // on the map — the touch-friendly equivalent of `mouseleave`. Skips clicks
+    // on a weather marker itself: that marker's own listener already decided
+    // whether to open it, and closing it again here would undo that.
+    instance.on("click", (event) => {
+      const target = event.originalEvent?.target as HTMLElement | null;
+      if (target?.closest(".weather-marker-btn")) return;
+      weatherPopup?.remove();
+      weatherPopup = undefined;
     });
 
     onCleanup(() => {

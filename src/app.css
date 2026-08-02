@@ -23,6 +23,15 @@
 
 @layer base {
   :root {
+    /*
+     * Without this, native form chrome (the datetime-local calendar icon and
+     * its popup, range-slider track/thumb defaults, scrollbars) always renders
+     * light, no matter which colour scheme the rest of the page is in — on a
+     * dark surface that leaves a dark-on-dark icon. `light dark` lets each
+     * browser pick to match `prefers-color-scheme`, the same signal every
+     * other colour in this file already follows.
+     */
+    color-scheme: light dark;
     --surface: #ffffff;
     --surface-raised: #f6f7f9;
     --surface-sunken: #eceef1;
