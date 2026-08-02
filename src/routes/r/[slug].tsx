@@ -20,7 +20,7 @@ const RouteMap = clientOnly(() => import("~/components/RouteMap"));
 // Shared with the `fallback` below so the skeleton occupies exactly the same
 // box as the real map — no layout shift once the client chunk loads.
 const MAP_CLASS =
-  "h-[52vh] max-h-[620px] min-h-[280px] w-full overflow-hidden rounded-xl border border-subtle sm:h-[58dvh]";
+  "mt-4 h-[52vh] max-h-[620px] min-h-[280px] w-full overflow-hidden rounded-xl border border-subtle sm:h-[58dvh]";
 
 const getRoute = query(async (slug: string) => {
   "use server";
@@ -198,21 +198,68 @@ export default function RoutePage() {
                   </Show>
                 </div>
 
-                <For each={plannableTracks()}>
-                  {(track) => (
-                    <RoutePlanner
-                      track={track}
-                      label={
-                        plannableTracks().length > 1
-                          ? `Plan ${track.name ?? "this stage"}`
-                          : "Plan this hike for a different day"
-                      }
-                      open={() => openStageId() === track.id}
-                      onToggle={() => toggleStage(track.id)}
-                      onChange={setPlan}
-                    />
-                  )}
-                </For>
+                {/* Single-track routes keep today's one full-width toggle button.
+                    Multi-track routes get a row of day chips instead — one big
+                    button per stage stacked vertically was too much before you'd
+                    even seen the map. Either way, every plannable track's
+                    `RoutePlanner` stays mounted so a stage remembers its start
+                    time/pace after you switch away and back; only the toggle
+                    button's presentation differs. */}
+                <Show
+                  when={plannableTracks().length > 1}
+                  fallback={
+                    <Show when={plannableTracks()[0]}>
+                      {(track) => (
+                        <>
+                          <div class="card mt-4 rounded-xl px-4 py-3">
+                            <button
+                              type="button"
+                              class="btn btn-secondary tap w-full justify-between"
+                              onClick={() => toggleStage(track().id)}
+                              aria-expanded={openStageId() === track().id}
+                              aria-controls={`plan-panel-${track().id}`}
+                            >
+                              <span>Plan this hike for a different day</span>
+                              <span aria-hidden="true">
+                                {openStageId() === track().id ? "−" : "+"}
+                              </span>
+                            </button>
+                          </div>
+                          <RoutePlanner
+                            track={track()}
+                            open={() => openStageId() === track().id}
+                            onChange={setPlan}
+                          />
+                        </>
+                      )}
+                    </Show>
+                  }
+                >
+                  <div class="mt-4 flex flex-wrap gap-2">
+                    <For each={plannableTracks()}>
+                      {(track, i) => (
+                        <button
+                          type="button"
+                          class={`btn tap ${openStageId() === track.id ? "btn-primary" : "btn-secondary"}`}
+                          onClick={() => toggleStage(track.id)}
+                          aria-expanded={openStageId() === track.id}
+                          aria-controls={`plan-panel-${track.id}`}
+                        >
+                          {track.name ?? `Day ${i() + 1}`}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                  <For each={plannableTracks()}>
+                    {(track) => (
+                      <RoutePlanner
+                        track={track}
+                        open={() => openStageId() === track.id}
+                        onChange={setPlan}
+                      />
+                    )}
+                  </For>
+                </Show>
 
                 {/* Map first: it's the reason someone opened the link. Sized with
                     dvh so mobile browser chrome doesn't crop it. */}

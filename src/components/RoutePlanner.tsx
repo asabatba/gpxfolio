@@ -38,11 +38,8 @@ export interface PlanState {
 
 interface RoutePlannerProps {
   track: TrackView;
-  /** Button label. Generic for a single-track route; per-stage on a multi-track one. */
-  label: string;
-  /** Whether this stage's panel is the one currently expanded — owned by the parent so only one stage is open at a time. */
+  /** Whether this stage's panel is the one currently expanded — owned by the parent (a shared toggle button or day chip) so only one stage is open at a time. */
   open: Accessor<boolean>;
-  onToggle: () => void;
   onChange: (state: PlanState) => void;
 }
 
@@ -77,11 +74,12 @@ export default function RoutePlanner(props: RoutePlannerProps) {
   }
 
   // Resets to sensible defaults the first time this stage is ever opened;
-  // reopening it later keeps whatever the visitor last set.
-  function handleToggleClick() {
-    if (!props.open() && start() == null) reset();
-    props.onToggle();
-  }
+  // reopening it later keeps whatever the visitor last set. The toggle button
+  // lives in the parent (a shared chip row on multi-day routes), so this
+  // reacts to `open` flipping true rather than owning the click itself.
+  createEffect(() => {
+    if (props.open() && start() == null) reset();
+  });
 
   const schedule = createMemo<Schedule | null>(() => {
     if (!props.open()) return null;
@@ -192,73 +190,63 @@ export default function RoutePlanner(props: RoutePlannerProps) {
   });
 
   return (
-    <section class="card mt-4 rounded-xl px-4 py-3">
-      <button
-        type="button"
-        class="btn btn-secondary tap w-full justify-between"
-        onClick={handleToggleClick}
-        aria-expanded={props.open()}
-        aria-controls={`plan-panel-${props.track.id}`}
+    <Show when={props.open()}>
+      <section
+        class="card mt-4 rounded-xl px-4 py-3"
+        id={`plan-panel-${props.track.id}`}
       >
-        <span>{props.label}</span>
-        <span aria-hidden="true">{props.open() ? "−" : "+"}</span>
-      </button>
-
-      <Show when={props.open()}>
-        <div id={`plan-panel-${props.track.id}`}>
-          <div class="mt-4 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
-            <div>
-              <label class="label" for={`plan-start-${props.track.id}`}>
-                Start
-              </label>
-              <input
-                ref={setStartInput}
-                id={`plan-start-${props.track.id}`}
-                type="datetime-local"
-                class="field"
-                min={toDatetimeLocalValue(Date.now(), timeZone())}
-                max={toDatetimeLocalValue(maxPlanStart(), timeZone())}
-                onInput={(event) => {
-                  const parsed = fromDatetimeLocalValue(event.currentTarget.value, timeZone());
-                  if (parsed != null) setStart(parsed);
-                }}
-              />
-              <p class="ink-muted mt-1 text-xs">Local time at the trailhead ({timeZone()})</p>
-            </div>
-
-            <div class="min-w-[240px] flex-1">
-              <label class="label" for={`plan-stretch-${props.track.id}`}>
-                Total hike time: {formatDuration(schedule()?.durationS ?? 0)} ({stretch().toFixed(2)}×
-                original pace)
-              </label>
-              <input
-                id={`plan-stretch-${props.track.id}`}
-                type="range"
-                min={STRETCH_MIN}
-                max={STRETCH_MAX}
-                step={0.05}
-                value={stretch()}
-                aria-valuetext={`${stretch().toFixed(2)}× original pace, ${formatDuration(schedule()?.durationS ?? 0)} total`}
-                style={{ "accent-color": "var(--accent)", width: "100%" }}
-                onInput={(event) => setStretch(Number(event.currentTarget.value))}
-              />
-            </div>
-
-            <button type="button" class="btn btn-ghost" onClick={reset}>
-              Reset
-            </button>
+        <div class="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
+          <div>
+            <label class="label" for={`plan-start-${props.track.id}`}>
+              Start
+            </label>
+            <input
+              ref={setStartInput}
+              id={`plan-start-${props.track.id}`}
+              type="datetime-local"
+              class="field"
+              min={toDatetimeLocalValue(Date.now(), timeZone())}
+              max={toDatetimeLocalValue(maxPlanStart(), timeZone())}
+              onInput={(event) => {
+                const parsed = fromDatetimeLocalValue(event.currentTarget.value, timeZone());
+                if (parsed != null) setStart(parsed);
+              }}
+            />
+            <p class="ink-muted mt-1 text-xs">Local time at the trailhead ({timeZone()})</p>
           </div>
 
-          <Show when={schedule()}>
-            {(s) => (
-              <p class="ink-muted mt-3 text-sm" aria-live="polite">
-                Starting {formatTimeInZone(s().startMs, timeZone())}, finishing around{" "}
-                {formatTimeInZone(s().startMs + s().durationS * 1000, timeZone())}.
-              </p>
-            )}
-          </Show>
+          <div class="min-w-60 flex-1">
+            <label class="label" for={`plan-stretch-${props.track.id}`}>
+              Total hike time: {formatDuration(schedule()?.durationS ?? 0)} ({stretch().toFixed(2)}×
+              original pace)
+            </label>
+            <input
+              id={`plan-stretch-${props.track.id}`}
+              type="range"
+              min={STRETCH_MIN}
+              max={STRETCH_MAX}
+              step={0.05}
+              value={stretch()}
+              aria-valuetext={`${stretch().toFixed(2)}× original pace, ${formatDuration(schedule()?.durationS ?? 0)} total`}
+              style={{ "accent-color": "var(--accent)", width: "100%" }}
+              onInput={(event) => setStretch(Number(event.currentTarget.value))}
+            />
+          </div>
+
+          <button type="button" class="btn btn-ghost" onClick={reset}>
+            Reset
+          </button>
         </div>
-      </Show>
-    </section>
+
+        <Show when={schedule()}>
+          {(s) => (
+            <p class="ink-muted mt-3 text-sm" aria-live="polite">
+              Starting {formatTimeInZone(s().startMs, timeZone())}, finishing around{" "}
+              {formatTimeInZone(s().startMs + s().durationS * 1000, timeZone())}.
+            </p>
+          )}
+        </Show>
+      </section>
+    </Show>
   );
 }
