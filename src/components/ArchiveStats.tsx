@@ -1,0 +1,149 @@
+import { A } from "@solidjs/router";
+import { For, Show } from "solid-js";
+import type { ArchiveStats as ArchiveStatsData } from "~/lib/archive-stats";
+import { formatDistance, formatDuration, formatElevation, formatSpeed } from "~/lib/format";
+
+interface ArchiveStatsProps {
+  stats: ArchiveStatsData;
+}
+
+interface Tile {
+  label: string;
+  value: string;
+}
+
+function totalsTiles(stats: ArchiveStatsData): Tile[] {
+  const tiles: Tile[] = [
+    { label: "Routes", value: stats.routeCount.toLocaleString() },
+    { label: "Distance", value: formatDistance(stats.distanceM) },
+    { label: "Elevation gain", value: formatElevation(stats.elevationGainM) },
+  ];
+  if (stats.timeS != null) {
+    tiles.push({ label: "Time", value: formatDuration(stats.timeS) });
+  }
+  return tiles;
+}
+
+interface RecordRow {
+  label: string;
+  slug: string;
+  title: string;
+  value: string;
+}
+
+function records(stats: ArchiveStatsData): RecordRow[] {
+  const rows: RecordRow[] = [];
+  if (stats.longestRoute) {
+    rows.push({
+      label: "Longest route",
+      slug: stats.longestRoute.slug,
+      title: stats.longestRoute.title,
+      value: formatDistance(stats.longestRoute.value),
+    });
+  }
+  if (stats.biggestClimb) {
+    rows.push({
+      label: "Biggest climb",
+      slug: stats.biggestClimb.slug,
+      title: stats.biggestClimb.title,
+      value: formatElevation(stats.biggestClimb.value),
+    });
+  }
+  if (stats.fastestAvg) {
+    rows.push({
+      label: "Fastest average",
+      slug: stats.fastestAvg.slug,
+      title: stats.fastestAvg.title,
+      value: formatSpeed(stats.fastestAvg.value),
+    });
+  }
+  return rows;
+}
+
+export default function ArchiveStats(props: ArchiveStatsProps) {
+  return (
+    <Show when={props.stats.routeCount > 0}>
+      <section class="py-8 sm:py-10">
+        <dl class="tabular grid grid-cols-2 gap-px overflow-hidden rounded-xl sm:grid-cols-4">
+          <For each={totalsTiles(props.stats)}>
+            {(tile) => (
+              <div
+                class="surface-raised px-3 py-3 sm:px-4 sm:py-4"
+                style={{ "background-color": "var(--border-subtle)" }}
+              >
+                <dt class="ink-muted text-[0.6875rem] font-semibold uppercase tracking-wider">
+                  {tile.label}
+                </dt>
+                <dd class="mt-1 text-xl font-semibold sm:text-2xl">{tile.value}</dd>
+              </div>
+            )}
+          </For>
+        </dl>
+
+        <Show when={records(props.stats).length > 0}>
+          <ul class="tabular mt-4 grid gap-2 sm:grid-cols-3">
+            <For each={records(props.stats)}>
+              {(row) => (
+                <li>
+                  <A
+                    href={`/r/${row.slug}`}
+                    class="card flex items-center justify-between gap-3 rounded-xl px-4 py-3 transition-transform hover:-translate-y-0.5"
+                  >
+                    <span>
+                      <span class="ink-muted block text-[0.6875rem] font-semibold uppercase tracking-wider">
+                        {row.label}
+                      </span>
+                      <span class="mt-0.5 block truncate text-sm font-medium">{row.title}</span>
+                    </span>
+                    <span class="shrink-0 font-semibold">{row.value}</span>
+                  </A>
+                </li>
+              )}
+            </For>
+          </ul>
+        </Show>
+
+        <Show when={props.stats.years.length > 0}>
+          <div class="card mt-4 overflow-x-auto rounded-xl">
+            <table class="tabular w-full text-sm">
+              <thead>
+                <tr class="border-b border-subtle text-left">
+                  <th class="ink-muted px-4 py-2 font-semibold uppercase tracking-wider text-[0.6875rem]">
+                    Year
+                  </th>
+                  <th class="ink-muted px-4 py-2 font-semibold uppercase tracking-wider text-[0.6875rem]">
+                    Routes
+                  </th>
+                  <th class="ink-muted px-4 py-2 font-semibold uppercase tracking-wider text-[0.6875rem]">
+                    Distance
+                  </th>
+                  <th class="ink-muted px-4 py-2 font-semibold uppercase tracking-wider text-[0.6875rem]">
+                    Elevation gain
+                  </th>
+                  <th class="ink-muted px-4 py-2 font-semibold uppercase tracking-wider text-[0.6875rem]">
+                    Time
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <For each={props.stats.years}>
+                  {(year) => (
+                    <tr class="border-b border-subtle last:border-b-0">
+                      <td class="px-4 py-2 font-medium">{year.year}</td>
+                      <td class="px-4 py-2">{year.routeCount}</td>
+                      <td class="px-4 py-2">{formatDistance(year.distanceM)}</td>
+                      <td class="px-4 py-2">{formatElevation(year.elevationGainM)}</td>
+                      <td class="px-4 py-2">
+                        {year.timeS != null ? formatDuration(year.timeS) : "—"}
+                      </td>
+                    </tr>
+                  )}
+                </For>
+              </tbody>
+            </table>
+          </div>
+        </Show>
+      </section>
+    </Show>
+  );
+}

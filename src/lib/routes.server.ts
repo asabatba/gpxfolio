@@ -422,7 +422,7 @@ async function withTracks(route: Route | undefined): Promise<RouteWithTracks | n
       .selectFrom("tracks")
       .selectAll()
       .where("routeId", "=", route.id)
-      .orderBy("orderIndex asc")
+      .orderBy("orderIndex", "asc")
       .execute(),
     listRoutePhotos(route.id),
   ]);
@@ -453,8 +453,8 @@ export async function listPublicRoutes(): Promise<Route[]> {
     .selectFrom("routes")
     .selectAll()
     .where("visibility", "=", "public")
-    .orderBy("startedAt desc")
-    .orderBy("createdAt desc")
+    .orderBy("startedAt", "desc")
+    .orderBy("createdAt", "desc")
     .execute();
   return rows.map(toRoute);
 }
@@ -464,8 +464,8 @@ export async function listAllRoutes(): Promise<Route[]> {
   const rows = await db
     .selectFrom("routes")
     .selectAll()
-    .orderBy("startedAt desc")
-    .orderBy("createdAt desc")
+    .orderBy("startedAt", "desc")
+    .orderBy("createdAt", "desc")
     .execute();
   return rows.map(toRoute);
 }
@@ -481,7 +481,7 @@ export async function listRouteThumbnails(
     .selectFrom("tracks")
     .select(["routeId", "geometry", "color"])
     .where("routeId", "in", routeIds)
-    .orderBy("orderIndex asc")
+    .orderBy("orderIndex", "asc")
     .execute();
 
   for (const row of rows) {

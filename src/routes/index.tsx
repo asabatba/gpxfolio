@@ -1,8 +1,10 @@
 import { Meta, Title } from "@solidjs/meta";
 import { A, createAsync, query, type RouteDefinition } from "@solidjs/router";
 import { For, Show, Suspense } from "solid-js";
+import ArchiveStats from "~/components/ArchiveStats";
 import SiteHeader from "~/components/SiteHeader";
 import TrackThumbnail from "~/components/TrackThumbnail";
+import { computeArchiveStats } from "~/lib/archive-stats";
 import { formatDateShort, formatDistance, formatElevation } from "~/lib/format";
 
 const getGallery = query(async () => {
@@ -18,6 +20,7 @@ const getGallery = query(async () => {
   return {
     isAdmin,
     siteName: process.env.PUBLIC_SITE_NAME ?? "gpxfolio",
+    archiveStats: computeArchiveStats(routes),
     routes: routes.map((route) => ({
       slug: route.slug,
       title: route.title,
@@ -56,6 +59,8 @@ export default function Home() {
                   Tracks I've recorded, with maps, elevation profiles and stats.
                 </p>
               </div>
+
+              <ArchiveStats stats={gallery().archiveStats} />
 
               <Show
                 when={gallery().routes.length > 0}
