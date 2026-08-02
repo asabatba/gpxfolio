@@ -1,12 +1,19 @@
 import { A } from "@solidjs/router";
+import { clientOnly } from "@solidjs/start";
 import { For, Show } from "solid-js";
-import ArchiveMap from "~/components/ArchiveMap";
+import MapSkeleton from "~/components/MapSkeleton";
 import type { ArchiveStats as ArchiveStatsData } from "~/lib/archive-stats";
 import { formatDistance, formatDuration, formatElevation, formatSpeed } from "~/lib/format";
 
+const ArchiveMap = clientOnly(() => import("~/components/ArchiveMap"));
+
+// Shared with the skeleton fallback so it occupies exactly the same box as the
+// real map — no layout shift once the client chunk loads.
+const MAP_CLASS = "card h-64 w-full overflow-hidden rounded-xl sm:h-80";
+
 interface ArchiveStatsProps {
   stats: ArchiveStatsData;
-  /** Encoded polylines from every public route's tracks, for the footprint map. */
+  /** Encoded polylines from every public route's tracks, for the overview map. */
   trackGeometries: string[];
 }
 
@@ -154,7 +161,8 @@ export default function ArchiveStats(props: ArchiveStatsProps) {
             </p>
             <ArchiveMap
               tracks={props.trackGeometries}
-              class="card mt-2 h-64 w-full rounded-xl sm:h-80"
+              class={`mt-2 ${MAP_CLASS}`}
+              fallback={<MapSkeleton class={`mt-2 ${MAP_CLASS}`} />}
             />
           </div>
         </Show>
