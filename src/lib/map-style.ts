@@ -58,6 +58,32 @@ export const FALLBACK_STYLE: StyleSpecification = {
 };
 
 /**
+ * A plain land/water silhouette, no raster tiles at all — used by `ArchiveMap`
+ * for the homepage's all-routes overview.
+ *
+ * That map has to render at very low, world-spanning zoom levels whenever two
+ * routes are geographically far apart, and OpenHikingMap's community tile
+ * server (see HIKING_STYLE) is slow to stitch together the many tiles that
+ * takes; a single ~140KB static land polygon (Natural Earth's 1:110m
+ * `ne_110m_land`, public domain, bundled at `public/land-110m.geojson`) loads
+ * once and renders at any zoom with no further network requests. Unlike the
+ * raster basemap, plain fill colours aren't baked into an image, so this one
+ * *can* follow the site's colour scheme — `dark` picks which pass to use.
+ */
+export function overviewStyle(dark: boolean): StyleSpecification {
+  return {
+    version: 8,
+    sources: {
+      land: { type: "geojson", data: "/land-110m.geojson" },
+    },
+    layers: [
+      { id: "water", type: "background", paint: { "background-color": dark ? "#0a2233" : "#d3e3ef" } },
+      { id: "land", type: "fill", source: "land", paint: { "fill-color": dark ? "#1c2733" : "#eceef1" } },
+    ],
+  };
+}
+
+/**
  * MapLibre works out its worker's URL at runtime by rewriting its own module
  * URL. Vite can't see through that, so the worker chunk is never emitted and the
  * request lands on the SPA fallback — which returns the HTML page with a 200.

@@ -3,7 +3,7 @@ import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import MapSkeleton from "~/components/MapSkeleton";
 import { TRACK_COLORS } from "~/lib/gpx/colors";
 import { decodePolyline } from "~/lib/gpx/encode";
-import { FALLBACK_STYLE, HIKING_STYLE } from "~/lib/map-style";
+import { overviewStyle } from "~/lib/map-style";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 /**
@@ -25,6 +25,9 @@ interface ArchiveMapProps {
  * an actual MapLibre map the viewer can zoom into. One uniform colour for
  * every line: with many routes at once, per-route colours (see `TRACK_COLORS`)
  * stop mapping to anything nameable without a legend anyway.
+ *
+ * Basemap is `overviewStyle` — a plain land/water silhouette, not the hiking
+ * tiles RouteMap/PreviewMap use — see that function's comment for why.
  */
 export default function ArchiveMap(props: ArchiveMapProps) {
   let container!: HTMLDivElement;
@@ -45,7 +48,7 @@ export default function ArchiveMap(props: ArchiveMapProps) {
       });
 
       // Same casing treatment as RouteMap/PreviewMap: keeps a thin line legible
-      // over both pale terrain and dark forest on the basemap.
+      // over both the pale-land and dark-water fills.
       instance.addLayer({
         id: `${sourceId}-casing`,
         type: "line",
@@ -83,12 +86,16 @@ export default function ArchiveMap(props: ArchiveMapProps) {
   }
 
   onMount(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+
     const instance = new MapLibreMap({
       container,
-      style: HIKING_STYLE,
+      style: overviewStyle(media.matches),
       center: [0, 0],
       zoom: 1,
-      attributionControl: { compact: true },
+      // Nothing here needs attributing (see public/land-110m.LICENSE.txt) and
+      // there's no tile source either, so the default control has nothing to show.
+      attributionControl: false,
       cooperativeGestures: true,
     });
 
@@ -100,20 +107,6 @@ export default function ArchiveMap(props: ArchiveMapProps) {
       setReady(true);
     });
 
-    // Same tolerant fallback as RouteMap/PreviewMap: a handful of failures is
-    // allowed before assuming the hiking tile server is unreachable.
-    let tileFailures = 0;
-    instance.on("error", (event) => {
-      if (instance.getSource("osm")) return;
-      const message = String(event.error?.message ?? "");
-      const isTileProblem =
-        message.includes("Failed to fetch") ||
-        message.includes("NetworkError") ||
-        message.includes("openmaps.fr");
-      if (!isTileProblem) return;
-      if (++tileFailures >= 4) instance.setStyle(FALLBACK_STYLE);
-    });
-
     // setStyle drops all layers, so tracks are re-added after a style swap.
     instance.on("styledata", () => {
       if (instance.isStyleLoaded() && !instance.getSource("archive-track-0")) {
@@ -121,7 +114,19 @@ export default function ArchiveMap(props: ArchiveMapProps) {
       }
     });
 
-    onCleanup(() => instance.remove());
+    // The raster basemap elsewhere on the site can't follow the colour scheme
+    // (see HIKING_STYLE's comment), but plain fill colours aren't baked into an
+    // image, so this map can — and should, rather than staying stuck on
+    // whichever theme was active when it first mounted.
+    const onSchemeChange = (event: MediaQueryListEvent) => {
+      instance.setStyle(overviewStyle(event.matches));
+    };
+    media.addEventListener("change", onSchemeChange);
+
+    onCleanup(() => {
+      media.removeEventListener("change", onSchemeChange);
+      instance.remove();
+    });
   });
 
   return (

@@ -1,0 +1,7 @@
+land-110m.geojson is Natural Earth's 1:110m physical vectors "land" layer
+(https://www.naturalearthdata.com), used by ArchiveMap.tsx as a plain
+land/water silhouette for the homepage's all-routes overview map.
+
+Natural Earth is public domain. From https://www.naturalearthdata.com/about/terms-of-use/:
+"No permission is needed to use Natural Earth. Crediting the authors is
+unnecessary." Kept here anyway for provenance.
