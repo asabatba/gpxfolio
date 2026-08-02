@@ -29,6 +29,18 @@ export interface ArchiveStats {
   fastestAvg: RouteRecord | null;
 }
 
+/**
+ * A single track's stats, standing in for one day/stage within a route. Used
+ * to score records per day rather than per route, so a multi-day trip's
+ * combined distance doesn't masquerade as a single day's effort.
+ */
+export interface RouteStage {
+  routeId: string;
+  distanceM: number;
+  elevationGainM: number;
+  avgSpeedMps: number | null;
+}
+
 /** Moving time reads better than wall-clock duration when both exist. */
 function routeTimeS(route: Route): number | null {
   return route.movingTimeS ?? route.durationS ?? null;
@@ -41,30 +53,32 @@ function routeYear(route: Route): number {
 
 function keepHighest(
   current: RouteRecord | null,
-  route: Route,
+  candidate: { title: string; slug: string },
   value: number | null,
 ): RouteRecord | null {
   if (value == null) return current;
   if (current && value <= current.value) return current;
-  return { title: route.title, slug: route.slug, value };
+  return { title: candidate.title, slug: candidate.slug, value };
 }
 
 /**
- * Aggregates a flat list of routes into the totals/per-year/records shown on
- * the homepage stats section. Pure and in-memory — cheap enough at any size
- * this personal archive is likely to reach, and it keeps the query in
- * `routes.server.ts` a single `listPublicRoutes()` call.
+ * Aggregates public routes into the totals/per-year/records shown on the
+ * homepage stats section. Totals and yearly breakdowns sum whole routes
+ * (every stage included), but records are scored per `stage` — one entry per
+ * track — so a multi-day trip's combined distance/climb/speed never counts
+ * as a single day's effort; only its best individual day competes.
+ *
+ * Pure and in-memory — cheap enough at any size this personal archive is
+ * likely to reach.
  */
-export function computeArchiveStats(routes: Route[]): ArchiveStats {
+export function computeArchiveStats(routes: Route[], stages: RouteStage[]): ArchiveStats {
   const years = new Map<number, YearlyStats>();
+  const routesById = new Map(routes.map((route) => [route.id, route]));
 
   let distanceM = 0;
   let elevationGainM = 0;
   let timeS = 0;
   let hasTime = false;
-  let longestRoute: RouteRecord | null = null;
-  let biggestClimb: RouteRecord | null = null;
-  let fastestAvg: RouteRecord | null = null;
 
   for (const route of routes) {
     distanceM += route.distanceM;
@@ -89,10 +103,19 @@ export function computeArchiveStats(routes: Route[]): ArchiveStats {
     bucket.elevationGainM += route.elevationGainM;
     if (t != null) bucket.timeS = (bucket.timeS ?? 0) + t;
     years.set(year, bucket);
+  }
 
-    longestRoute = keepHighest(longestRoute, route, route.distanceM);
-    biggestClimb = keepHighest(biggestClimb, route, route.elevationGainM);
-    fastestAvg = keepHighest(fastestAvg, route, route.avgSpeedMps);
+  let longestRoute: RouteRecord | null = null;
+  let biggestClimb: RouteRecord | null = null;
+  let fastestAvg: RouteRecord | null = null;
+
+  for (const stage of stages) {
+    const route = routesById.get(stage.routeId);
+    if (!route) continue;
+
+    longestRoute = keepHighest(longestRoute, route, stage.distanceM);
+    biggestClimb = keepHighest(biggestClimb, route, stage.elevationGainM);
+    fastestAvg = keepHighest(fastestAvg, route, stage.avgSpeedMps);
   }
 
   return {

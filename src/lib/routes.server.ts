@@ -1,4 +1,5 @@
 import { sql, type Updateable } from "kysely";
+import type { RouteStage } from "./archive-stats";
 import { db } from "./db";
 import {
   routeValues,
@@ -523,4 +524,15 @@ export async function listRouteThumbnails(
     result.set(row.routeId, list);
   }
   return result;
+}
+
+/** Per-track stats for archive records — each track stands for one day/stage. */
+export async function listRouteStages(routeIds: string[]): Promise<RouteStage[]> {
+  if (routeIds.length === 0) return [];
+
+  return db
+    .selectFrom("tracks")
+    .select(["routeId", "distanceM", "elevationGainM", "avgSpeedMps"])
+    .where("routeId", "in", routeIds)
+    .execute();
 }

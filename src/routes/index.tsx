@@ -9,18 +9,22 @@ import { formatDateShort, formatDistance, formatElevation } from "~/lib/format";
 
 const getGallery = query(async () => {
   "use server";
-  const { listPublicRoutes, listRouteThumbnails } = await import("~/lib/routes.server");
+  const { listPublicRoutes, listRouteThumbnails, listRouteStages } = await import(
+    "~/lib/routes.server"
+  );
   const { isAuthenticated } = await import("~/lib/auth");
   const routes = await listPublicRoutes();
-  const [thumbnails, isAdmin] = await Promise.all([
-    listRouteThumbnails(routes.map((r) => r.id)),
+  const routeIds = routes.map((r) => r.id);
+  const [thumbnails, stages, isAdmin] = await Promise.all([
+    listRouteThumbnails(routeIds),
+    listRouteStages(routeIds),
     isAuthenticated(),
   ]);
 
   return {
     isAdmin,
     siteName: process.env.PUBLIC_SITE_NAME ?? "gpxfolio",
-    archiveStats: computeArchiveStats(routes),
+    archiveStats: computeArchiveStats(routes, stages),
     trackGeometries: [...thumbnails.values()].flatMap((tracks) => tracks.map((t) => t.geometry)),
     routes: routes.map((route) => ({
       slug: route.slug,
