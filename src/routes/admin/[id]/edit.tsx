@@ -382,6 +382,7 @@ export default function EditRoute() {
                     name="files"
                     maxFiles={MAX_FILES}
                     maxBytes={MAX_BYTES}
+                    showGpxDates
                     onChange={setFiles}
                   />
                   <div class="mt-3">

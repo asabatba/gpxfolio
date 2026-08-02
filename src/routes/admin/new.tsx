@@ -43,6 +43,7 @@ export default function NewRoute() {
             name="files"
             maxFiles={MAX_FILES}
             maxBytes={MAX_BYTES}
+            showGpxDates
             onChange={setFiles}
           />
           <UploadMapPreview files={files()} />
