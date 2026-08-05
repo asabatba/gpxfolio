@@ -14,6 +14,7 @@ const MAX_BYTES = 25 * 1024 * 1024;
 export default function NewRoute() {
   const submission = useSubmission(createRouteAction);
   const [files, setFiles] = createSignal<File[]>([]);
+  const [importUrl, setImportUrl] = createSignal("");
 
   return (
     <>
@@ -29,7 +30,8 @@ export default function NewRoute() {
         <div class="py-6">
           <h1 class="text-2xl font-semibold tracking-tight">Create a shareable route</h1>
           <p class="ink-muted mt-1 text-sm">
-            Upload one GPX file, or several to combine them into a single page.
+            Upload one GPX file, or several to combine them into a single page — or paste a URL
+            below to fetch one instead.
           </p>
         </div>
 
@@ -47,6 +49,25 @@ export default function NewRoute() {
             onChange={setFiles}
           />
           <UploadMapPreview files={files()} />
+
+          <div>
+            <label class="label" for="importUrl">
+              Or import from a URL <span class="font-normal">(optional)</span>
+            </label>
+            <input
+              id="importUrl"
+              name="importUrl"
+              type="url"
+              class="field"
+              placeholder="https://www.strava.com/activities/…/export_gpx"
+              value={importUrl()}
+              onInput={(event) => setImportUrl(event.currentTarget.value)}
+            />
+            <p class="ink-muted mt-1 text-xs">
+              Fetched server-side when you submit, and combined with any files chosen above —
+              Strava's activity pages have an "Export GPX" link.
+            </p>
+          </div>
 
           <div>
             <label class="label" for="title">
@@ -115,13 +136,15 @@ export default function NewRoute() {
             <button
               type="submit"
               class="btn btn-primary"
-              disabled={submission.pending || files().length === 0}
+              disabled={submission.pending || (files().length === 0 && !importUrl().trim())}
             >
               {submission.pending ? "Processing GPX…" : "Create route"}
             </button>
             <Show when={submission.pending}>
               <span class="ink-muted text-xs">
-                Parsing, computing stats and compressing the track.
+                {importUrl().trim()
+                  ? "Fetching, parsing, computing stats and compressing the track."
+                  : "Parsing, computing stats and compressing the track."}
               </span>
             </Show>
           </div>

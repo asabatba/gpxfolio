@@ -69,6 +69,18 @@ export const createRouteAction = action(async (formData: FormData) => {
 
   try {
     const files = await readGpxFiles(formData);
+
+    const importUrl = String(formData.get("importUrl") ?? "").trim();
+    if (importUrl) {
+      const { fetchGpxFromUrl, ImportUrlError } = await import("./import-url.server");
+      try {
+        files.push(await fetchGpxFromUrl(importUrl));
+      } catch (error) {
+        if (error instanceof ImportUrlError) throw new ValidationError(error.message);
+        throw error;
+      }
+    }
+
     const result = await createRoute({
       title: String(formData.get("title") ?? ""),
       description: String(formData.get("description") ?? ""),
