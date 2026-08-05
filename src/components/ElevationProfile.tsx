@@ -22,6 +22,29 @@ const PAD_BOTTOM = 26;
 const PLOT_W = VIEW_W - PAD_LEFT - PAD_RIGHT;
 const PLOT_H = VIEW_H - PAD_TOP - PAD_BOTTOM;
 
+/** Beyond this, the line is fully saturated — a typical "very steep" grade for hiking/gravel. */
+const MAX_GRADE_PCT = 18;
+
+/**
+ * Diverging colour for one segment's steepness: `--grade-climb` /
+ * `--grade-descent` at the poles, blending toward the neutral
+ * `--ink-muted` as a segment flattens out — see `app.css` for why this
+ * particular pair was chosen (validated against both colour schemes with the
+ * dataviz skill's palette checker).
+ */
+function gradeColor(gradePct: number): string {
+  const t = Math.max(-1, Math.min(1, gradePct / MAX_GRADE_PCT));
+  const pole = t >= 0 ? "var(--grade-climb)" : "var(--grade-descent)";
+  return `color-mix(in oklab, ${pole} ${Math.round(Math.abs(t) * 100)}%, var(--ink-muted))`;
+}
+
+/** "+8%" / "-12%" / "flat", for the hover readout. */
+function formatGrade(gradePct: number): string {
+  const rounded = Math.round(gradePct);
+  if (rounded === 0) return "flat";
+  return `${rounded > 0 ? "+" : ""}${rounded}%`;
+}
+
 interface Sample {
   trackId: string;
   index: number;
@@ -128,13 +151,49 @@ export default function ElevationProfile(props: ElevationProfileProps) {
     return `${top}L${xOf(list[list.length - 1].distanceM).toFixed(2)},${baseline}L${xOf(list[0].distanceM).toFixed(2)},${baseline}Z`;
   });
 
-  const linePath = createMemo(() => {
+  interface GradeSegment {
+    d: string;
+    color: string;
+    toM: number;
+    gradePct: number;
+  }
+
+  /**
+   * One `<path>` per drawn segment rather than a single multi-point path, so
+   * each can carry its own steepness colour — same downsample budget as the
+   * line it replaces, so this is no more SVG than before.
+   */
+  const gradeSegments = createMemo<GradeSegment[]>(() => {
     const list = drawn();
-    if (list.length === 0) return "";
-    return list
-      .map((s, i) => `${i === 0 ? "M" : "L"}${xOf(s.distanceM).toFixed(2)},${yOf(s.elevationM).toFixed(2)}`)
-      .join("");
+    const segments: GradeSegment[] = [];
+    for (let i = 1; i < list.length; i++) {
+      const prev = list[i - 1];
+      const curr = list[i];
+      const dx = curr.distanceM - prev.distanceM;
+      const gradePct = dx > 1 ? ((curr.elevationM - prev.elevationM) / dx) * 100 : 0;
+      segments.push({
+        d: `M${xOf(prev.distanceM).toFixed(2)},${yOf(prev.elevationM).toFixed(2)}L${xOf(curr.distanceM).toFixed(2)},${yOf(curr.elevationM).toFixed(2)}`,
+        color: gradeColor(gradePct),
+        toM: curr.distanceM,
+        gradePct,
+      });
+    }
+    return segments;
   });
+
+  /** The grade shown alongside distance/elevation in the hover readout — the same value its segment is coloured by. */
+  function gradePercentAt(distanceM: number): number | null {
+    const segments = gradeSegments();
+    if (segments.length === 0) return null;
+    let lo = 0;
+    let hi = segments.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (segments[mid].toM < distanceM) lo = mid + 1;
+      else hi = mid;
+    }
+    return segments[lo].gradePct;
+  }
 
   /** Four evenly spaced elevation gridlines. */
   const yTicks = createMemo(() => {
@@ -257,6 +316,8 @@ export default function ElevationProfile(props: ElevationProfileProps) {
     const parts = [`at ${formatDistance(distanceM)}`];
     const elevationM = point?.elevationM ?? sampleAtDistance(distanceM)?.elevationM;
     if (elevationM != null) parts.push(`elevation ${formatElevation(elevationM)}`);
+    const gradePct = gradePercentAt(distanceM);
+    if (gradePct != null) parts.push(`grade ${formatGrade(gradePct)}`);
     const arrival = arrivalTextAt(distanceM);
     if (arrival != null) parts.push(`arriving ${arrival}`);
     return parts.join(", ");
@@ -312,9 +373,12 @@ export default function ElevationProfile(props: ElevationProfileProps) {
           aria-hidden="true"
         >
           <defs>
+            {/* Neutral now that the line itself carries colour (grade) — an
+                accent-tinted wash would visually compete with a climb-coloured
+                line above it. */}
             <linearGradient id="elevation-fill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.32" />
-              <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.02" />
+              <stop offset="0%" stop-color="var(--ink-muted)" stop-opacity="0.28" />
+              <stop offset="100%" stop-color="var(--ink-muted)" stop-opacity="0.02" />
             </linearGradient>
           </defs>
 
@@ -343,14 +407,18 @@ export default function ElevationProfile(props: ElevationProfileProps) {
           </For>
 
           <path d={areaPath()} fill="url(#elevation-fill)" />
-          <path
-            d={linePath()}
-            fill="none"
-            stroke="var(--accent)"
-            stroke-width="2"
-            stroke-linejoin="round"
-            vector-effect="non-scaling-stroke"
-          />
+          <For each={gradeSegments()}>
+            {(segment) => (
+              <path
+                d={segment.d}
+                fill="none"
+                stroke={segment.color}
+                stroke-width="2"
+                stroke-linecap="round"
+                vector-effect="non-scaling-stroke"
+              />
+            )}
+          </For>
 
           <For each={xTicks()}>
             {(distance, i) => (
@@ -416,6 +484,14 @@ export default function ElevationProfile(props: ElevationProfileProps) {
                     {formatElevation(point().elevationM as number)}
                   </span>
                 </Show>
+                {/* `when={... != null}`, not the raw percentage — a flat 0%
+                    grade is falsy and would otherwise hide its own readout. */}
+                <Show when={gradePercentAt(point().distanceM) != null}>
+                  <span>
+                    <span class="ink-muted">grade </span>
+                    {formatGrade(gradePercentAt(point().distanceM) as number)}
+                  </span>
+                </Show>
                 <Show when={point().timeOffsetS != null}>
                   <span>
                     <span class="ink-muted">after </span>
@@ -433,6 +509,21 @@ export default function ElevationProfile(props: ElevationProfileProps) {
               </>
             )}
           </Show>
+
+          {/* Decorative: the line's own colour already carries this, and the
+              hover readout above states the exact grade in text — this is
+              purely an at-a-glance key to what the colour means. */}
+          <span class="ml-auto flex items-center gap-1.5 text-xs" aria-hidden="true">
+            <span class="ink-muted">Descent</span>
+            <span
+              class="h-1.5 w-12 rounded-full"
+              style={{
+                background:
+                  "linear-gradient(to right, var(--grade-descent), var(--ink-muted), var(--grade-climb))",
+              }}
+            />
+            <span class="ink-muted">Climb</span>
+          </span>
         </figcaption>
       </figure>
     </Show>

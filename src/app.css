@@ -40,6 +40,16 @@
     --ink-muted: #5c6470;
     --accent: #d94f08;
     --shadow-card: 0 1px 2px rgb(20 23 28 / 0.06), 0 4px 12px rgb(20 23 28 / 0.04);
+    /*
+     * Elevation-profile grade colouring (`ElevationProfile.tsx`): a diverging
+     * pair around `--ink-muted` as the flat/zero-grade midpoint, validated
+     * with the dataviz skill's palette checker against both this surface and
+     * the dark one below (`node scripts/validate_palette.js
+     * "#e8590c,#1f7fc4" --mode light`, then `--mode dark`) — both pass CVD
+     * separation and contrast unchanged, so one pair covers both themes.
+     */
+    --grade-climb: #e8590c;
+    --grade-descent: #1f7fc4;
   }
 
   @media (prefers-color-scheme: dark) {
