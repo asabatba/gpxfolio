@@ -30,8 +30,8 @@ export default function NewRoute() {
         <div class="py-6">
           <h1 class="text-2xl font-semibold tracking-tight">Create a shareable route</h1>
           <p class="ink-muted mt-1 text-sm">
-            Upload one GPX file, or several to combine them into a single page — or paste a URL
-            below to fetch one instead.
+            Upload one GPX or FIT file, or several to combine them into a single page — or paste a
+            URL below to fetch one instead.
           </p>
         </div>
 

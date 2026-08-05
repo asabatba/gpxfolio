@@ -6,9 +6,10 @@ import { formatDate, formatDistance, formatElevation } from "~/lib/format";
 import { TRACK_COLORS } from "~/lib/gpx/colors";
 import { denoise } from "~/lib/gpx/denoise";
 import { parseGpx } from "~/lib/gpx/parse";
+import { parseFit } from "~/lib/gpx/parse-fit";
 import { DEFAULT_TOLERANCE_M, simplifyToBudget } from "~/lib/gpx/simplify";
 import { aggregateStats, computeStats } from "~/lib/gpx/stats";
-import { GpxParseError, type RouteStats } from "~/lib/gpx/types";
+import { GpxParseError, type ParsedGpx, type RouteStats } from "~/lib/gpx/types";
 
 const PreviewMap = clientOnly(() => import("~/components/PreviewMap"));
 
@@ -81,17 +82,21 @@ export default function UploadMapPreview(props: UploadMapPreviewProps) {
       const starts: number[] = [];
 
       for (const file of files) {
-        let xml: string;
+        let parsed: ParsedGpx;
         try {
-          xml = await file.text();
-        } catch {
-          nextErrors.push({ filename: file.name, message: "couldn't be read." });
+          parsed = /\.fit$/i.test(file.name)
+            ? parseFit(new Uint8Array(await file.arrayBuffer()))
+            : parseGpx(await file.text());
+        } catch (cause) {
+          nextErrors.push({
+            filename: file.name,
+            message: cause instanceof GpxParseError ? cause.message : "couldn't be read.",
+          });
           continue;
         }
         if (current !== generation) return;
 
         try {
-          const parsed = parseGpx(xml);
           for (const track of parsed.tracks) {
             // Same pipeline as buildTrack.ts: glitches filtered before stats
             // are computed and before the line is simplified, so nothing here

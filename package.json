@@ -17,6 +17,7 @@
     "db:migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {
+    "@garmin/fitsdk": "^21.208.0",
     "@solidjs/meta": "^0.29.4",
     "@solidjs/router": "^1.0.0",
     "@solidjs/start": "^1.3.2",

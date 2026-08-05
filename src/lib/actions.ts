@@ -10,7 +10,12 @@ import { action, redirect } from "@solidjs/router";
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
-/** Reads the uploaded GPX files out of a FormData, enforcing size and type. */
+/**
+ * Reads the uploaded GPX/FIT files out of a FormData, enforcing size and
+ * type. A .fit file is normalized to GPX text right here — see
+ * `fitToGpxXml`'s doc for why — so every caller downstream of this function
+ * still only ever deals with GPX, exactly as before.
+ */
 async function readGpxFiles(formData: FormData, field = "files") {
   const { ValidationError } = await import("./routes.server");
   const entries = formData.getAll(field).filter((v): v is File => v instanceof File);
@@ -18,13 +23,27 @@ async function readGpxFiles(formData: FormData, field = "files") {
 
   for (const file of entries) {
     if (file.size === 0) continue; // Empty file input posts a zero-byte entry.
-    if (!/\.gpx$/i.test(file.name)) {
-      throw new ValidationError(`${file.name} is not a .gpx file.`);
-    }
     if (file.size > MAX_FILE_BYTES) {
       throw new ValidationError(
         `${file.name} is larger than the ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB limit.`,
       );
+    }
+
+    if (/\.fit$/i.test(file.name)) {
+      const { fitToGpxXml } = await import("./gpx/parse-fit");
+      const { GpxParseError } = await import("./gpx/types");
+      try {
+        const xml = fitToGpxXml(new Uint8Array(await file.arrayBuffer()));
+        files.push({ filename: file.name, xml });
+      } catch (error) {
+        const detail = error instanceof GpxParseError ? error.message : "Unreadable .fit file.";
+        throw new ValidationError(`${file.name}: ${detail}`);
+      }
+      continue;
+    }
+
+    if (!/\.gpx$/i.test(file.name)) {
+      throw new ValidationError(`${file.name} is not a .gpx or .fit file.`);
     }
     files.push({ filename: file.name, xml: await file.text() });
   }

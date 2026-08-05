@@ -1,5 +1,6 @@
 import { createSignal, For, Show } from "solid-js";
 import { formatBytes, formatDateISO } from "~/lib/format";
+import { parseFit } from "~/lib/gpx/parse-fit";
 import { parseGpx } from "~/lib/gpx/parse";
 
 interface UploadDropzoneProps {
@@ -8,34 +9,36 @@ interface UploadDropzoneProps {
   maxBytes: number;
   /** Reports the current selection so the parent can enable/disable submit. */
   onChange?: (files: File[]) => void;
-  /** `<input accept>` value. Defaults to GPX. */
+  /** `<input accept>` value. Defaults to GPX/FIT. */
   accept?: string;
-  /** Filename check; a candidate failing this is rejected with `extensionError`. Defaults to `.gpx`. */
+  /** Filename check; a candidate failing this is rejected with `extensionError`. Defaults to `.gpx`/`.fit`. */
   extensionPattern?: RegExp;
-  /** Shown when a file fails `extensionPattern`, prefixed with the filename. Defaults to "is not a .gpx file." */
+  /** Shown when a file fails `extensionPattern`, prefixed with the filename. Defaults to "is not a .gpx or .fit file." */
   extensionError?: string;
-  /** Button copy. Defaults to "Choose GPX files". */
+  /** Button copy. Defaults to "Choose GPX or FIT files". */
   buttonLabel?: string;
-  /** Hint line under the button; `{max}` files, `{size}` each are filled in for you. Defaults to the GPX copy. */
+  /** Hint line under the button; `{max}` files, `{size}` each are filled in for you. Defaults to the GPX/FIT copy. */
   hint?: string;
   /**
    * For multi-day trips: parses each file's earliest track timestamp, shows
    * it next to the filename, and sorts the selection by that date (oldest
    * first) so upload order — which becomes stage order — matches trip order
    * without the uploader having to pick files in date order themselves.
-   * Files with no timestamp sort last. GPX-only; leave off for photos.
+   * Files with no timestamp sort last. GPX/FIT-only; leave off for photos.
    */
   showGpxDates?: boolean;
 }
 
-const GPX_EXTENSION_PATTERN = /\.gpx$/i;
+const TRACK_EXTENSION_PATTERN = /\.(gpx|fit)$/i;
 
-/** Earliest trackpoint timestamp across a GPX file's tracks, or null if untimed/unparseable. */
+/** Earliest trackpoint timestamp across a GPX or FIT file's tracks, or null if untimed/unparseable. */
 async function readGpxDate(file: File): Promise<number | null> {
   try {
-    const xml = await file.text();
-    const starts = parseGpx(xml)
-      .tracks.map((track) => track.points[0]?.time)
+    const parsed = /\.fit$/i.test(file.name)
+      ? parseFit(new Uint8Array(await file.arrayBuffer()))
+      : parseGpx(await file.text());
+    const starts = parsed.tracks
+      .map((track) => track.points[0]?.time)
       .filter((time): time is number => time != null);
     return starts.length > 0 ? Math.min(...starts) : null;
   } catch {
@@ -54,7 +57,7 @@ interface FileEntry {
  *
  * The picker input is kept in the DOM and its `files` set programmatically via a
  * DataTransfer, so dropped files take part in the ordinary form submission
- * instead of needing a separate upload path. Defaults to GPX; pass `accept`/
+ * instead of needing a separate upload path. Defaults to GPX/FIT; pass `accept`/
  * `extensionPattern`/copy props to reuse it for other file types (photos).
  */
 export default function UploadDropzone(props: UploadDropzoneProps) {
@@ -63,8 +66,8 @@ export default function UploadDropzone(props: UploadDropzoneProps) {
   const [dragging, setDragging] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
-  const extensionPattern = () => props.extensionPattern ?? GPX_EXTENSION_PATTERN;
-  const extensionError = () => props.extensionError ?? "is not a .gpx file.";
+  const extensionPattern = () => props.extensionPattern ?? TRACK_EXTENSION_PATTERN;
+  const extensionError = () => props.extensionError ?? "is not a .gpx or .fit file.";
 
   // Keyed by File so removing one entry doesn't force re-parsing the rest.
   const dateCache = new Map<File, number | null>();
@@ -169,7 +172,7 @@ export default function UploadDropzone(props: UploadDropzoneProps) {
           id={props.name}
           name={props.name}
           type="file"
-          accept={props.accept ?? ".gpx,application/gpx+xml"}
+          accept={props.accept ?? ".gpx,.fit,application/gpx+xml"}
           multiple
           class="sr-only"
           onChange={(event) => apply(Array.from(event.currentTarget.files ?? []))}
@@ -191,7 +194,7 @@ export default function UploadDropzone(props: UploadDropzoneProps) {
           />
         </svg>
         <label for={props.name} class="btn btn-secondary cursor-pointer">
-          {props.buttonLabel ?? "Choose GPX files"}
+          {props.buttonLabel ?? "Choose GPX or FIT files"}
         </label>
         <p class="ink-muted mt-2 text-xs">
           {props.hint ??
