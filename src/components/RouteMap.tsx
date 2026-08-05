@@ -12,6 +12,7 @@ import MapSkeleton from "~/components/MapSkeleton";
 import type { WeatherMarkerView } from "~/components/RoutePlanner";
 import type { BBox } from "~/lib/gpx/types";
 import { FALLBACK_STYLE, HIKING_STYLE } from "~/lib/map-style";
+import { createOnlineSignal } from "~/lib/online-status";
 import type { HoverPoint, PhotoView, TrackView } from "~/lib/track-view";
 import { weatherFamilyLabel, weatherIconMarkup } from "~/lib/weather-icons";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -75,7 +76,14 @@ function weatherAriaLabel(marker: WeatherMarkerView): string {
   return `Forecast: ${temp}, ${weatherFamilyLabel(marker.symbolCode)}, ${time}${resolution}`;
 }
 
-export default function RouteMap(props: RouteMapProps) {
+/**
+ * Does the actual MapLibre work. Split out from `RouteMap` below so it's only
+ * ever instantiated while online — `onMount` here fires at most once per
+ * mount, so an offline→online transition needs a fresh instance (via
+ * `<Show>` swapping this component in), not a signal this one could react to
+ * mid-life.
+ */
+function MapCanvas(props: RouteMapProps) {
   let container!: HTMLDivElement;
   let map: MapLibreMap | undefined;
   let hoverMarker: Marker | undefined;
@@ -421,5 +429,24 @@ export default function RouteMap(props: RouteMapProps) {
         <MapSkeleton class="pointer-events-none absolute inset-0" />
       </Show>
     </div>
+  );
+}
+
+/**
+ * Gates `MapCanvas` behind connectivity: there's nothing productive it can do
+ * offline (no cached tiles, no style to fetch — see the offline/PWA ticket's
+ * research writeup), so it isn't even instantiated then. `<Show>` mounting a
+ * fresh `MapCanvas` on regaining connectivity is simpler and more correct
+ * than trying to resume a half-initialized MapLibre instance in place.
+ */
+export default function RouteMap(props: RouteMapProps) {
+  const offline = createOnlineSignal();
+  return (
+    <Show
+      when={!offline()}
+      fallback={<MapSkeleton class={props.class} message="Map unavailable offline" pulse={false} />}
+    >
+      <MapCanvas {...props} />
+    </Show>
   );
 }

@@ -4,6 +4,7 @@ import { clientOnly } from "@solidjs/start";
 import { createMemo, createSignal, For, Show, Suspense } from "solid-js";
 import ElevationProfile from "~/components/ElevationProfile";
 import MapSkeleton from "~/components/MapSkeleton";
+import OfflineBadge from "~/components/OfflineBadge";
 import PhotoGallery from "~/components/PhotoGallery";
 import RoutePlanner, { type PlanState } from "~/components/RoutePlanner";
 import ShareButton from "~/components/ShareButton";
@@ -167,6 +168,7 @@ export default function RoutePage() {
                     Edit
                   </A>
                 </Show>
+                <OfflineBadge />
                 <ShareButton title={route().title} />
               </SiteHeader>
 
