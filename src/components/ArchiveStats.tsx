@@ -2,7 +2,8 @@ import { A } from "@solidjs/router";
 import { clientOnly } from "@solidjs/start";
 import { For, Show } from "solid-js";
 import MapSkeleton from "~/components/MapSkeleton";
-import type { ArchiveStats as ArchiveStatsData } from "~/lib/archive-stats";
+import YearlyBarChart, { type YearBar } from "~/components/YearlyBarChart";
+import type { ArchiveStats as ArchiveStatsData, YearlyStats } from "~/lib/archive-stats";
 import { formatDistance, formatDuration, formatElevation, formatSpeed } from "~/lib/format";
 
 const ArchiveMap = clientOnly(() => import("~/components/ArchiveMap"));
@@ -70,6 +71,35 @@ function records(stats: ArchiveStatsData): RecordRow[] {
   return rows;
 }
 
+/** Oldest first — the table this replaces was newest-first, but a trend reads left-to-right as "then to now." */
+function chronological(years: YearlyStats[]): YearlyStats[] {
+  return [...years].sort((a, b) => a.year - b.year);
+}
+
+function distanceBars(years: YearlyStats[]): YearBar[] {
+  return chronological(years).map((y) => ({
+    year: y.year,
+    value: y.distanceM,
+    tooltip: `${y.year}: ${formatDistance(y.distanceM)}`,
+  }));
+}
+
+function elevationBars(years: YearlyStats[]): YearBar[] {
+  return chronological(years).map((y) => ({
+    year: y.year,
+    value: y.elevationGainM,
+    tooltip: `${y.year}: ${formatElevation(y.elevationGainM)}`,
+  }));
+}
+
+function timeBars(years: YearlyStats[]): YearBar[] {
+  return chronological(years).map((y) => ({
+    year: y.year,
+    value: y.timeS ?? 0,
+    tooltip: `${y.year}: ${y.timeS != null ? formatDuration(y.timeS) : "no time recorded"}`,
+  }));
+}
+
 export default function ArchiveStats(props: ArchiveStatsProps) {
   return (
     <Show when={props.stats.routeCount > 0}>
@@ -114,43 +144,10 @@ export default function ArchiveStats(props: ArchiveStatsProps) {
         </Show>
 
         <Show when={props.stats.years.length > 0}>
-          <div class="card mt-4 overflow-x-auto rounded-xl">
-            <table class="tabular w-full text-sm">
-              <thead>
-                <tr class="border-b border-subtle text-left">
-                  <th class="ink-muted px-4 py-2 font-semibold uppercase tracking-wider text-[0.6875rem]">
-                    Year
-                  </th>
-                  <th class="ink-muted px-4 py-2 font-semibold uppercase tracking-wider text-[0.6875rem]">
-                    Routes
-                  </th>
-                  <th class="ink-muted px-4 py-2 font-semibold uppercase tracking-wider text-[0.6875rem]">
-                    Distance
-                  </th>
-                  <th class="ink-muted px-4 py-2 font-semibold uppercase tracking-wider text-[0.6875rem]">
-                    Elevation gain
-                  </th>
-                  <th class="ink-muted px-4 py-2 font-semibold uppercase tracking-wider text-[0.6875rem]">
-                    Time
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <For each={props.stats.years}>
-                  {(year) => (
-                    <tr class="border-b border-subtle last:border-b-0">
-                      <td class="px-4 py-2 font-medium">{year.year}</td>
-                      <td class="px-4 py-2">{year.routeCount}</td>
-                      <td class="px-4 py-2">{formatDistance(year.distanceM)}</td>
-                      <td class="px-4 py-2">{formatElevation(year.elevationGainM)}</td>
-                      <td class="px-4 py-2">
-                        {year.timeS != null ? formatDuration(year.timeS) : "—"}
-                      </td>
-                    </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
+          <div class="mt-4 grid gap-2 sm:grid-cols-3">
+            <YearlyBarChart title="Distance" bars={distanceBars(props.stats.years)} />
+            <YearlyBarChart title="Elevation gain" bars={elevationBars(props.stats.years)} />
+            <YearlyBarChart title="Time" bars={timeBars(props.stats.years)} />
           </div>
         </Show>
 
