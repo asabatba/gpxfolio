@@ -73,6 +73,23 @@ export default function Home() {
             );
           };
 
+          // "Newest" needs no client-side sort at all — `getGallery` already
+          // returns routes in that order (see `listPublicRoutes`), so
+          // preserving the array as-is instead of re-sorting on the same key
+          // keeps ties (same day, no time recorded) in their stable server
+          // order rather than however `Array.sort` happens to reshuffle them.
+          const sortedRoutes = () => {
+            const routes = filteredRoutes();
+            switch (searchParams.sort) {
+              case "distance":
+                return [...routes].sort((a, b) => b.distanceM - a.distanceM);
+              case "elevation":
+                return [...routes].sort((a, b) => b.elevationGainM - a.elevationGainM);
+              default:
+                return routes;
+            }
+          };
+
           return (
             <>
               <Title>{gallery().siteName}</Title>
@@ -90,38 +107,70 @@ export default function Home() {
 
                 <ArchiveStats stats={gallery().archiveStats} trackGeometries={gallery().trackGeometries} />
 
-                <Show when={availableYears().length > 0}>
-                  <div class="flex items-center justify-end gap-2 pb-4">
-                    <label class="ink-muted text-xs font-semibold uppercase tracking-wider" for="year-filter">
-                      Year
-                    </label>
-                    <select
-                      id="year-filter"
-                      class="field w-auto py-1.5 text-sm"
-                      onChange={(event) => setSearchParams({ year: event.currentTarget.value || null })}
-                    >
-                      {/* `selected` on each <option>, not `value` on <select>: a plain HTML
-                          parse (the SSR'd markup, before hydration) only honors the former —
-                          `<select value>` is a Solid-only convenience that never reaches the
-                          static HTML, so a hard reload of a filtered URL would otherwise
-                          render the dropdown back on "All years" despite the list actually
-                          being filtered. */}
-                      <option value="" selected={!searchParams.year}>
-                        All years
-                      </option>
-                      <For each={availableYears()}>
-                        {(year) => (
-                          <option value={year} selected={searchParams.year === String(year)}>
-                            {year}
+                <Show when={gallery().routes.length > 0}>
+                  <div class="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 pb-4">
+                    <Show when={availableYears().length > 0}>
+                      <div class="flex items-center gap-2">
+                        <label
+                          class="ink-muted text-xs font-semibold uppercase tracking-wider"
+                          for="year-filter"
+                        >
+                          Year
+                        </label>
+                        <select
+                          id="year-filter"
+                          class="field w-auto py-1.5 text-sm"
+                          onChange={(event) => setSearchParams({ year: event.currentTarget.value || null })}
+                        >
+                          {/* `selected` on each <option>, not `value` on <select>: a plain HTML
+                              parse (the SSR'd markup, before hydration) only honors the former —
+                              `<select value>` is a Solid-only convenience that never reaches the
+                              static HTML, so a hard reload of a filtered URL would otherwise
+                              render the dropdown back on "All years" despite the list actually
+                              being filtered. */}
+                          <option value="" selected={!searchParams.year}>
+                            All years
                           </option>
-                        )}
-                      </For>
-                    </select>
+                          <For each={availableYears()}>
+                            {(year) => (
+                              <option value={year} selected={searchParams.year === String(year)}>
+                                {year}
+                              </option>
+                            )}
+                          </For>
+                        </select>
+                      </div>
+                    </Show>
+
+                    <div class="flex items-center gap-2">
+                      <label
+                        class="ink-muted text-xs font-semibold uppercase tracking-wider"
+                        for="sort-order"
+                      >
+                        Sort
+                      </label>
+                      <select
+                        id="sort-order"
+                        class="field w-auto py-1.5 text-sm"
+                        onChange={(event) => setSearchParams({ sort: event.currentTarget.value || null })}
+                      >
+                        {/* Same SSR-safe `selected`-per-option pattern as the year filter above. */}
+                        <option value="" selected={!searchParams.sort}>
+                          Newest
+                        </option>
+                        <option value="distance" selected={searchParams.sort === "distance"}>
+                          Longest
+                        </option>
+                        <option value="elevation" selected={searchParams.sort === "elevation"}>
+                          Most climbing
+                        </option>
+                      </select>
+                    </div>
                   </div>
                 </Show>
 
                 <Show
-                  when={filteredRoutes().length > 0}
+                  when={sortedRoutes().length > 0}
                   fallback={
                     <div class="card rounded-xl px-6 py-12 text-center">
                       <Show
@@ -152,7 +201,7 @@ export default function Home() {
                   }
                 >
                   <ul class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <For each={filteredRoutes()}>
+                    <For each={sortedRoutes()}>
                       {(item) => (
                         <li>
                           <A
