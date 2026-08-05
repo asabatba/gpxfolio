@@ -269,6 +269,19 @@ export const deletePhotoAction = action(async (formData: FormData) => {
   throw redirect(`/admin/${routeId}/edit`);
 }, "deletePhoto");
 
+export const updatePhotoPositionAction = action(async (formData: FormData) => {
+  "use server";
+  const { requireAdmin } = await import("./auth");
+  const { updatePhotoPosition } = await import("./photos.server");
+  await requireAdmin();
+
+  const routeId = String(formData.get("routeId") ?? "");
+  const lat = Number(formData.get("lat"));
+  const lon = Number(formData.get("lon"));
+  await updatePhotoPosition(routeId, String(formData.get("photoId") ?? ""), lat, lon);
+  throw redirect(`/admin/${routeId}/edit`);
+}, "updatePhotoPosition");
+
 export const nudgePhotoTimesAction = action(async (formData: FormData) => {
   "use server";
   const { requireAdmin } = await import("./auth");

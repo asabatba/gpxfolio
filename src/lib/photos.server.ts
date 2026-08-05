@@ -393,6 +393,46 @@ export async function updatePhotoCaption(
     .execute();
 }
 
+/**
+ * Manually repositions a photo pin — the fix for a `"time-match"` placement
+ * that guessed wrong (no GPS tags to trust, so it snapped to whichever track
+ * point was nearest in time). `positionSource` becomes `"manual"`, which
+ * `nudgePhotoTimes` above already treats like `"gps"`: never re-derived by a
+ * later time correction, since a dragged pin is a deliberate override, not a
+ * guess to redo.
+ *
+ * `distanceAlongM`/`trackId` are still recomputed against the nearest track
+ * point (same {@link SPATIAL_MATCH_MAX_M} radius as a GPS-tagged photo) so the
+ * elevation profile can still place a marker for it — purely a lookup, it
+ * never moves `lat`/`lon` again after this.
+ */
+export async function updatePhotoPosition(
+  routeId: string,
+  photoId: string,
+  lat: number,
+  lon: number,
+): Promise<void> {
+  const route = await getRouteById(routeId);
+  if (!route) throw new ValidationError("That route no longer exists.");
+
+  const { trackCoords, trackDistances } = buildTrackIndex(route.tracks);
+  const nearest = nearestAcrossTracks(trackCoords, lat, lon);
+  const match = nearest && nearest.distanceM <= SPATIAL_MATCH_MAX_M ? nearest : null;
+
+  await db
+    .updateTable("photos")
+    .set({
+      lat,
+      lon,
+      positionSource: "manual" satisfies PositionSource,
+      trackId: match?.trackId ?? null,
+      distanceAlongM: match ? (trackDistances.get(match.trackId)?.[match.index] ?? null) : null,
+    })
+    .where("id", "=", photoId)
+    .where("routeId", "=", routeId)
+    .execute();
+}
+
 export async function deletePhoto(routeId: string, photoId: string): Promise<void> {
   await db.deleteFrom("photos").where("id", "=", photoId).where("routeId", "=", routeId).execute();
   await deletePhotoBlob(routeId, photoId);

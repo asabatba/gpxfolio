@@ -51,8 +51,10 @@ export interface PhotoView {
   lon: number | null;
   /**
    * How `lat`/`lon` was derived — `"gps"` pins are fixed from the photo's own
-   * EXIF tags; `"time-match"` pins shift if the photo's time is corrected;
-   * null means no position was resolved at all.
+   * EXIF tags, `"manual"` pins were dragged into place by an admin (and, like
+   * `"gps"`, never move on a time correction); `"time-match"` pins shift if
+   * the photo's time is corrected; null means no position was resolved at
+   * all.
    */
   positionSource: PositionSource | null;
   /** Metres from the associated track's start, for the elevation-profile marker. Null if unmatched. */

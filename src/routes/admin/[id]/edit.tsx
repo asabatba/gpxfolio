@@ -8,9 +8,11 @@ import {
   useSubmission,
   type RouteDefinition,
 } from "@solidjs/router";
-import { createEffect, createSignal, For, Show, Suspense } from "solid-js";
+import { clientOnly } from "@solidjs/start";
+import { createEffect, createMemo, createSignal, For, Show, Suspense } from "solid-js";
 import Breadcrumbs from "~/components/Breadcrumbs";
 import ConfirmDialog, { type PendingConfirm } from "~/components/ConfirmDialog";
+import MapSkeleton from "~/components/MapSkeleton";
 import SiteHeader from "~/components/SiteHeader";
 import UploadDropzone from "~/components/UploadDropzone";
 import UploadMapPreview from "~/components/UploadMapPreview";
@@ -23,13 +25,17 @@ import {
   moveTrackAction,
   nudgePhotoTimesAction,
   updatePhotoCaptionAction,
+  updatePhotoPositionAction,
   updateRouteAction,
   updateTrackAction,
 } from "~/lib/actions";
 import { ACTIVITY_SUGGESTIONS } from "~/lib/activities";
 import { formatBytes, formatCount, formatDistance, formatElevation, formatTime } from "~/lib/format";
 import type { AddPhotosResult } from "~/lib/photos.server";
-import { toPhotoView } from "~/lib/track-view";
+import { bboxOrFallback, toPhotoView, toTrackView } from "~/lib/track-view";
+
+// Same rationale as the route page: MapLibre touches `window` at import time.
+const RouteMap = clientOnly(() => import("~/components/RouteMap"));
 
 const MAX_FILES = 10;
 const MAX_BYTES = 25 * 1024 * 1024;
@@ -74,6 +80,10 @@ const getRouteForEdit = query(async (id: string) => {
       pointCountOriginal: track.pointCountOriginal,
       pointCountStored: track.pointCountStored,
     })),
+    // Full geometry, only for the drag-to-reposition map below — the "Tracks"
+    // list above reads from the lighter-weight `tracks` field.
+    mapTracks: route.tracks.map(toTrackView),
+    bbox: route.bbox ?? null,
     photos: route.photos.map((photo) => toPhotoView(photo, route.slug)),
   };
 }, "routeForEdit");
@@ -93,10 +103,24 @@ export default function EditRoute() {
   const addPhotosSubmission = useSubmission(addPhotosAction);
   const removePhoto = useAction(deletePhotoAction);
   const nudgeTimes = useAction(nudgePhotoTimesAction);
+  const movePhoto = useAction(updatePhotoPositionAction);
   const [photoFileCount, setPhotoFileCount] = createSignal(0);
   const [photoTotalBytes, setPhotoTotalBytes] = createSignal(0);
   const [selectedPhotos, setSelectedPhotos] = createSignal<Set<string>>(new Set());
   const [pendingConfirm, setPendingConfirm] = createSignal<PendingConfirm | null>(null);
+
+  // The reposition map has no elevation profile to hover and never hides a
+  // track, unlike the public route page's — these accessors just satisfy
+  // `RouteMap`'s props with the "everything visible, nothing hovered" case.
+  const noHover = () => null;
+  function handlePhotoMoved(routeId: string, id: string, lat: number, lon: number) {
+    const formData = new FormData();
+    formData.set("routeId", routeId);
+    formData.set("photoId", id);
+    formData.set("lat", String(lat));
+    formData.set("lon", String(lon));
+    void movePhoto(formData);
+  }
 
   function confirmRemoveTrack(routeId: string, trackId: string, label: string) {
     setPendingConfirm({
@@ -464,6 +488,27 @@ export default function EditRoute() {
 
                 <Show when={route().photos.length > 0}>
                   <div class="mt-4">
+                    {/* Only worth showing once at least one pin has a position to
+                        drag — a route with only unmatched photos has nothing
+                        to place yet. */}
+                    <Show when={route().photos.some((p) => p.lat != null && p.lon != null)}>
+                      <div class="card mb-3 overflow-hidden rounded-lg">
+                        <p class="ink-muted px-3 pt-2 text-xs">
+                          Drag a pin to fix a photo's position on the map.
+                        </p>
+                        <RouteMap
+                          tracks={route().mapTracks}
+                          bbox={bboxOrFallback(route().bbox, route().mapTracks)}
+                          hovered={noHover}
+                          photos={route().photos}
+                          onPhotoMoved={(id, lat, lon) => handlePhotoMoved(route().id, id, lat, lon)}
+                          visibleTrackIds={() => new Set(route().mapTracks.map((t) => t.id))}
+                          class="mt-2 h-80 w-full"
+                          fallback={<MapSkeleton class="mt-2 h-80 w-full" />}
+                        />
+                      </div>
+                    </Show>
+
                     <div class="card mb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg px-3 py-2 text-xs">
                       <button
                         type="button"
@@ -533,6 +578,14 @@ export default function EditRoute() {
                                   title="Position from GPS — won't move if this photo's time is shifted"
                                 >
                                   GPS
+                                </span>
+                              </Show>
+                              <Show when={photo.positionSource === "manual"}>
+                                <span
+                                  class="absolute right-1.5 top-1.5 z-10 rounded-full bg-black/60 px-1.5 py-0.5 text-[0.625rem] font-semibold text-white"
+                                  title="Position set by hand on the map — won't move if this photo's time is shifted"
+                                >
+                                  Placed
                                 </span>
                               </Show>
                               <img

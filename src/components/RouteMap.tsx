@@ -31,6 +31,13 @@ interface RouteMapProps {
   /** Photos with a resolved position get a pin; others are omitted. */
   photos?: PhotoView[];
   onSelectPhoto?: (id: string) => void;
+  /**
+   * Admin edit mode: photo pins become draggable, and dropping one calls this
+   * with its new position instead of `onSelectPhoto`'s click-to-view. The two
+   * are mutually exclusive — a pin a viewer can pick up shouldn't also open
+   * the gallery out from under their drag.
+   */
+  onPhotoMoved?: (id: string, lat: number, lon: number) => void;
   /** Hourly weather along a "plan this hike" schedule, from `RoutePlanner`. Redrawn whenever it changes. */
   weatherMarkers?: Accessor<WeatherMarkerView[]>;
   /**
@@ -181,14 +188,33 @@ function MapCanvas(props: RouteMapProps) {
    * handler below) without needing to be re-added.
    */
   function drawPhotoPins(instance: MapLibreMap) {
+    const draggable = !!props.onPhotoMoved;
     for (const photo of props.photos ?? []) {
       if (photo.lat == null || photo.lon == null) continue;
       const el = document.createElement("button");
       el.type = "button";
       el.setAttribute("aria-label", photo.caption ?? "Photo");
-      el.style.cssText = `width:28px;height:28px;border-radius:50%;background-image:url("${photo.thumbUrl}");background-size:cover;background-position:center;border:2.5px solid #fff;box-shadow:0 1px 4px rgb(0 0 0 / 0.4);cursor:pointer;padding:0;`;
-      el.addEventListener("click", () => props.onSelectPhoto?.(photo.id));
-      photoMarkers.push(new Marker({ element: el }).setLngLat([photo.lon, photo.lat]).addTo(instance));
+      el.style.cssText = `width:28px;height:28px;border-radius:50%;background-image:url("${photo.thumbUrl}");background-size:cover;background-position:center;border:2.5px solid #fff;box-shadow:0 1px 4px rgb(0 0 0 / 0.4);cursor:${draggable ? "grab" : "pointer"};padding:0;`;
+
+      const marker = new Marker({ element: el, draggable }).setLngLat([photo.lon, photo.lat]).addTo(instance);
+
+      if (draggable) {
+        // A drag ends in the same click event sequence a plain tap would fire,
+        // so binding `onSelectPhoto` here too would open the gallery right
+        // after every reposition — the two handlers stay mutually exclusive.
+        marker.on("dragstart", () => {
+          el.style.cursor = "grabbing";
+        });
+        marker.on("dragend", () => {
+          el.style.cursor = "grab";
+          const { lat, lng } = marker.getLngLat();
+          props.onPhotoMoved?.(photo.id, lat, lng);
+        });
+      } else {
+        el.addEventListener("click", () => props.onSelectPhoto?.(photo.id));
+      }
+
+      photoMarkers.push(marker);
     }
   }
 
