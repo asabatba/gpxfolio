@@ -44,6 +44,11 @@ const getRoute = query(async (slug: string) => {
     startedAt: route.startedAt?.getTime() ?? null,
     bbox: route.bbox ?? null,
     siteName: process.env.PUBLIC_SITE_NAME ?? "gpxfolio",
+    // Absolute per the OpenGraph spec — a relative og:image is undefined
+    // behaviour for most unfurlers. Falls back to a relative URL (still
+    // correct for same-origin previewers) if the site's origin isn't
+    // configured, rather than omitting the tag.
+    ogImageUrl: `${process.env.PUBLIC_SITE_URL ?? ""}/api/routes/${route.slug}/og.png`,
     stats: {
       distanceM: route.distanceM,
       elevationGainM: route.elevationGainM,
@@ -156,7 +161,11 @@ export default function RoutePage() {
               <Meta property="og:title" content={route().title} />
               <Meta property="og:description" content={route().description ?? summary()} />
               <Meta property="og:type" content="article" />
-              <Meta name="twitter:card" content="summary" />
+              <Meta property="og:image" content={route().ogImageUrl} />
+              <Meta property="og:image:width" content="1200" />
+              <Meta property="og:image:height" content="630" />
+              <Meta name="twitter:card" content="summary_large_image" />
+              <Meta name="twitter:image" content={route().ogImageUrl} />
               {/* Unlisted routes must never be indexed, or the slug stops being private. */}
               <Show when={route().visibility === "unlisted"}>
                 <Meta name="robots" content="noindex, nofollow" />

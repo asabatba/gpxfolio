@@ -1,5 +1,5 @@
 import { createMemo, For } from "solid-js";
-import { decodePolyline } from "~/lib/gpx/encode";
+import { buildThumbnailPaths } from "~/lib/gpx/thumbnail-paths";
 
 interface TrackThumbnailProps {
   tracks: Array<{ geometry: string; color: string }>;
@@ -14,51 +14,12 @@ const PAD = 14;
  * The route's shape as a plain SVG, drawn from the stored polyline.
  *
  * Gallery cards use this instead of a real map so the homepage renders instantly
- * and issues no tile requests, however many routes are listed.
+ * and issues no tile requests, however many routes are listed. The projection
+ * math lives in `~/lib/gpx/thumbnail-paths` so the server-rendered og:image
+ * (`api/routes/[slug]/og.png.ts`) draws the exact same shape.
  */
 export default function TrackThumbnail(props: TrackThumbnailProps) {
-  const paths = createMemo(() => {
-    const decoded = props.tracks.map((track) => ({
-      color: track.color,
-      points: decodePolyline(track.geometry),
-    }));
-
-    let minLat = Infinity;
-    let maxLat = -Infinity;
-    let minLon = Infinity;
-    let maxLon = -Infinity;
-    for (const track of decoded) {
-      for (const [lat, lon] of track.points) {
-        if (lat < minLat) minLat = lat;
-        if (lat > maxLat) maxLat = lat;
-        if (lon < minLon) minLon = lon;
-        if (lon > maxLon) maxLon = lon;
-      }
-    }
-    if (!Number.isFinite(minLat)) return [];
-
-    // Scale longitude by cos(lat) so the shape isn't stretched east-west, then
-    // fit with a single scale factor to preserve the route's real proportions.
-    const latSpan = Math.max(maxLat - minLat, 1e-6);
-    const lonScale = Math.cos(((minLat + maxLat) / 2) * (Math.PI / 180));
-    const lonSpan = Math.max((maxLon - minLon) * lonScale, 1e-6);
-
-    const scale = Math.min((W - PAD * 2) / lonSpan, (H - PAD * 2) / latSpan);
-    const offsetX = (W - lonSpan * scale) / 2;
-    const offsetY = (H - latSpan * scale) / 2;
-
-    return decoded.map((track) => ({
-      color: track.color,
-      d: track.points
-        .map(([lat, lon], i) => {
-          const x = offsetX + (lon - minLon) * lonScale * scale;
-          // SVG y grows downward, latitude grows upward.
-          const y = offsetY + (maxLat - lat) * scale;
-          return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-        })
-        .join(""),
-    }));
-  });
+  const paths = createMemo(() => buildThumbnailPaths(props.tracks, W, H, PAD));
 
   return (
     <svg
