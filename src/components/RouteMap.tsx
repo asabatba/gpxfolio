@@ -1,4 +1,5 @@
 import {
+  type GeoJSONSource,
   GeolocateControl,
   LngLatBounds,
   Map as MapLibreMap,
@@ -7,12 +8,13 @@ import {
   Popup,
   ScaleControl,
 } from "maplibre-gl";
-import { createEffect, createSignal, onCleanup, onMount, Show, type Accessor } from "solid-js";
+import { type Accessor, createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import MapSkeleton from "~/components/MapSkeleton";
 import type { WeatherMarkerView } from "~/components/RoutePlanner";
 import type { BBox } from "~/lib/gpx/types";
 import { FALLBACK_STYLE, HIKING_STYLE } from "~/lib/map-style";
 import { createOnlineSignal } from "~/lib/online-status";
+import type { RangeSelection } from "~/lib/range-stats";
 import type { HoverPoint, PhotoView, TrackView } from "~/lib/track-view";
 import { weatherFamilyLabel, weatherIconMarkup } from "~/lib/weather-icons";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -38,6 +40,8 @@ interface RouteMapProps {
    * the gallery out from under their drag.
    */
   onPhotoMoved?: (id: string, lat: number, lon: number) => void;
+  /** The elevation profile's dragged-out distance span, highlighted on top of its own track's line. */
+  selectedRange?: Accessor<RangeSelection | null>;
   /** Hourly weather along a "plan this hike" schedule, from `RoutePlanner`. Redrawn whenever it changes. */
   weatherMarkers?: Accessor<WeatherMarkerView[]>;
   /**
@@ -263,6 +267,62 @@ function MapCanvas(props: RouteMapProps) {
     applyTrackVisibility(instance);
   }
 
+  const RANGE_SOURCE_ID = "elevation-range-highlight";
+
+  /**
+   * Source+layers for the elevation profile's selected range, empty until a
+   * range exists. A dedicated `setData`-driven source rather than a `Marker`
+   * pair: the highlight is a line, not a point, and it changes on every
+   * pointermove while dragging, which `setData` handles far more cheaply
+   * than removing/re-adding a layer each time.
+   *
+   * Coloured with the same fixed accent hex the start/finish pins use
+   * (`#e8590c`/`#e03131`-style literals), not `var(--accent)` — MapLibre's
+   * paint properties are evaluated by its own expression engine, not CSS, so
+   * a custom property means nothing to it here (unlike the hover marker's
+   * plain HTML/CSS element, where `var(--accent)` works fine).
+   */
+  function ensureRangeLayer(instance: MapLibreMap) {
+    if (instance.getSource(RANGE_SOURCE_ID)) return;
+    instance.addSource(RANGE_SOURCE_ID, {
+      type: "geojson",
+      data: { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [] } },
+    });
+    instance.addLayer({
+      id: `${RANGE_SOURCE_ID}-casing`,
+      type: "line",
+      source: RANGE_SOURCE_ID,
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: {
+        "line-color": "#ffffff",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 8, 9, 14, 15],
+      },
+    });
+    instance.addLayer({
+      id: RANGE_SOURCE_ID,
+      type: "line",
+      source: RANGE_SOURCE_ID,
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: {
+        "line-color": "#e8590c",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 8, 4, 14, 7],
+      },
+    });
+  }
+
+  /** Redraws the range highlight from scratch — cheap, since it's just a `setData` on an existing source. */
+  function updateRangeHighlight(instance: MapLibreMap) {
+    const source = instance.getSource(RANGE_SOURCE_ID) as GeoJSONSource | undefined;
+    if (!source) return;
+
+    const range = props.selectedRange?.();
+    const track = range ? props.tracks.find((t) => t.id === range.trackId) : null;
+    const coordinates =
+      range && track ? track.coordinates.slice(range.startIndex, range.endIndex + 1) : [];
+
+    source.setData({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates } });
+  }
+
   /** Shows/hides each track's layers to match the Tracks list checkboxes. */
   function applyTrackVisibility(instance: MapLibreMap) {
     const visible = props.visibleTrackIds();
@@ -351,6 +411,7 @@ function MapCanvas(props: RouteMapProps) {
 
     instance.on("load", () => {
       drawTracks(instance);
+      ensureRangeLayer(instance);
       updateEndpointMarkers(instance);
       fitToRoute(instance);
       drawPhotoPins(instance);
@@ -374,10 +435,13 @@ function MapCanvas(props: RouteMapProps) {
       if (++tileFailures >= 4) instance.setStyle(FALLBACK_STYLE);
     });
 
-    // setStyle drops all layers, so the tracks are re-added after a style swap.
+    // setStyle drops all layers, so the tracks (and the range highlight
+    // source they're joined by) are re-added after a style swap.
     instance.on("styledata", () => {
       if (instance.isStyleLoaded() && !instance.getSource(`track-${props.tracks[0]?.id}`)) {
         drawTracks(instance);
+        ensureRangeLayer(instance);
+        updateRangeHighlight(instance);
       }
     });
 
@@ -415,6 +479,15 @@ function MapCanvas(props: RouteMapProps) {
     if (!instance || !ready()) return;
     applyTrackVisibility(instance);
     updateEndpointMarkers(instance);
+  });
+
+  // Redrawn whenever the elevation profile's selected range changes —
+  // including on every pointermove while it's still being dragged out.
+  createEffect(() => {
+    props.selectedRange?.();
+    const instance = map;
+    if (!instance || !ready()) return;
+    updateRangeHighlight(instance);
   });
 
   // Redrawn whenever the plan panel's schedule/weather changes.

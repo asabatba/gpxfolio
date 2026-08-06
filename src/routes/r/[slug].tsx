@@ -12,6 +12,7 @@ import SiteHeader from "~/components/SiteHeader";
 import StatsGrid from "~/components/StatsGrid";
 import { formatDate, formatDateISO, formatDistance, formatElevation } from "~/lib/format";
 import type { RouteStats } from "~/lib/gpx/types";
+import type { RangeSelection } from "~/lib/range-stats";
 import { bboxOrFallback, toPhotoView, toTrackView, type HoverPoint } from "~/lib/track-view";
 
 // MapLibre touches `window` at import time, so it must never be evaluated on the
@@ -79,6 +80,7 @@ export default function RoutePage() {
   // route's — which defeats the point of a shareable page.
   const data = createAsync(() => getRoute(params.slug as string), { deferStream: true });
   const [hovered, setHovered] = createSignal<HoverPoint | null>(null);
+  const [range, setRange] = createSignal<RangeSelection | null>(null);
   const [selectedPhotoId, setSelectedPhotoId] = createSignal<string | null>(null);
   const [plan, setPlan] = createSignal<PlanState | null>(null);
 
@@ -278,6 +280,7 @@ export default function RoutePage() {
                   tracks={route().tracks}
                   bbox={bboxOrFallback(route().bbox, route().tracks)}
                   hovered={hovered}
+                  selectedRange={range}
                   photos={route().photos}
                   onSelectPhoto={setSelectedPhotoId}
                   weatherMarkers={() => plan()?.markers ?? []}
@@ -294,6 +297,9 @@ export default function RoutePage() {
                     tracks={route().tracks}
                     hovered={hovered}
                     setHovered={setHovered}
+                    range={range}
+                    setRange={setRange}
+                    activityType={route().activityType}
                     plan={elevationProfilePlan}
                   />
                 </section>

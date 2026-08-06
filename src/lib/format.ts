@@ -22,6 +22,14 @@ export function formatSpeed(mps: number): string {
   return `${(mps * 3.6).toFixed(1)} km/h`;
 }
 
+const PACE_ACTIVITIES = ["run", "running", "hike", "hiking", "walk", "walking", "trail"];
+
+/** Running and hiking read better as pace; riding as speed — shared so every speed readout picks consistently. */
+export function prefersPace(activityType: string | null | undefined): boolean {
+  if (!activityType) return false;
+  return PACE_ACTIVITIES.includes(activityType.trim().toLowerCase());
+}
+
 /**
  * Pace, the useful figure for running and hiking. Speed is the useful figure for
  * cycling, so both exist and the route page picks by activity type.

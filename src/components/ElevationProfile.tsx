@@ -1,12 +1,26 @@
-import { createMemo, For, Show, type Setter } from "solid-js";
-import { formatDistance, formatDuration, formatElevation, formatTimeInZone } from "~/lib/format";
+import { createMemo, createSignal, For, type Setter, Show } from "solid-js";
+import {
+  formatDistance,
+  formatDuration,
+  formatElevation,
+  formatPace,
+  formatSpeed,
+  formatTimeInZone,
+  prefersPace,
+} from "~/lib/format";
 import type { Schedule } from "~/lib/planning";
+import { computeRangeStats, type RangeSelection } from "~/lib/range-stats";
 import type { HoverPoint, TrackView } from "~/lib/track-view";
 
 interface ElevationProfileProps {
   tracks: TrackView[];
   hovered: () => HoverPoint | null;
   setHovered: Setter<HoverPoint | null>;
+  /** A dragged-out distance span, shared with the map's highlight — see `range-stats.ts`. */
+  range: () => RangeSelection | null;
+  setRange: Setter<RangeSelection | null>;
+  /** Running/hiking read as pace, riding as speed — same convention `StatsGrid` uses. */
+  activityType?: string | null;
   /** Set while `RoutePlanner`'s panel is open, to add an arrival-time readout at the hovered point. */
   plan?: () => { schedule: Schedule; timeZone: string } | null;
 }
@@ -24,6 +38,14 @@ const PLOT_H = VIEW_H - PAD_TOP - PAD_BOTTOM;
 
 /** Beyond this, the line is fully saturated — a typical "very steep" grade for hiking/gravel. */
 const MAX_GRADE_PCT = 18;
+
+/**
+ * How far (in real screen pixels, not viewBox units) a press has to move
+ * before it stops being treated as an ordinary point-trace and becomes a
+ * range selection instead. Below this, a shaky tap or a small drag still
+ * just traces a point, exactly as before this feature existed.
+ */
+const RANGE_DRAG_THRESHOLD_PX = 10;
 
 /**
  * Diverging colour for one segment's steepness: `--grade-climb` /
@@ -92,6 +114,30 @@ export default function ElevationProfile(props: ElevationProfileProps) {
       offset += track.distanceM;
     }
     return out;
+  });
+
+  /**
+   * Each track's own span within the flattened profile, for clamping a range
+   * drag to one track. Derived from `samples()`'s own flattened distances —
+   * not from `offset`/`track.distanceM` (the full-resolution total) — because
+   * that scalar and the *simplified* series' actual last point can differ by
+   * a metre or two (RDP straight-lines corners, shortening the stored path
+   * slightly). Clamping to the scalar instead of the real data landed a drag
+   * exactly on the next track's first sample rather than this track's last
+   * one, on any route where that gap happened to fall the wrong way.
+   */
+  const trackSpans = createMemo(() => {
+    const map = new Map<string, { minM: number; maxM: number }>();
+    for (const s of samples()) {
+      const existing = map.get(s.trackId);
+      if (!existing) {
+        map.set(s.trackId, { minM: s.distanceM, maxM: s.distanceM });
+      } else {
+        if (s.distanceM < existing.minM) existing.minM = s.distanceM;
+        if (s.distanceM > existing.maxM) existing.maxM = s.distanceM;
+      }
+    }
+    return map;
   });
 
   const extent = createMemo(() => {
@@ -228,16 +274,18 @@ export default function ElevationProfile(props: ElevationProfileProps) {
     return candidate;
   }
 
-  /** Maps a client x-coordinate to the nearest sample by distance. */
-  function sampleAt(clientX: number): Sample | null {
+  /** Maps a client x-coordinate to a distance along the route (viewBox-aware, clamped to the plot). */
+  function distanceAtClientX(clientX: number): number {
     const rect = svg.getBoundingClientRect();
-    if (rect.width === 0) return null;
-
-    // Convert to viewBox units, then to a distance along the route.
+    if (rect.width === 0) return 0;
     const viewX = ((clientX - rect.left) / rect.width) * VIEW_W;
     const ratio = (viewX - PAD_LEFT) / PLOT_W;
-    const targetM = Math.max(0, Math.min(1, ratio)) * extent().totalM;
-    return sampleAtDistance(targetM);
+    return Math.max(0, Math.min(1, ratio)) * extent().totalM;
+  }
+
+  /** Maps a client x-coordinate to the nearest sample by distance. */
+  function sampleAt(clientX: number): Sample | null {
+    return sampleAtDistance(distanceAtClientX(clientX));
   }
 
   function setHoveredSample(sample: Sample | null) {
@@ -260,10 +308,69 @@ export default function ElevationProfile(props: ElevationProfileProps) {
     setHoveredSample(sampleAt(event.clientX));
   }
 
+  // --- Range selection --------------------------------------------------
+  //
+  // A press below RANGE_DRAG_THRESHOLD_PX of movement behaves exactly like
+  // plain point-tracing always has. Crossing that threshold "upgrades" the
+  // same press into a range drag: the start is wherever the press began, the
+  // end follows the pointer (clamped to that track's own span — a range
+  // never bridges into the next day's track), and releasing locks it in.
+  //
+  // `props.range` is updated live on every move once past the threshold —
+  // not just on release — so the map's highlight (which reads the same
+  // lifted signal, not anything local to this component) tracks the drag in
+  // real time instead of jumping in only once it's finished. `isDragging`
+  // exists purely to hide the "Clear" button while the drag is still live —
+  // clearing a selection that isn't finished yet doesn't make sense.
+  //
+  // `dragStartSample`/`pastThreshold` are plain mutable fields, not signals:
+  // they're only ever read synchronously inside the pointer handlers below,
+  // the same way `svg` is a plain ref rather than a signal.
+  let dragStartClientX = 0;
+  let dragStartSample: Sample | null = null;
+  let pastThreshold = false;
+  const [isDragging, setIsDragging] = createSignal(false);
+
+  function normalizeRange(a: Sample, b: Sample): RangeSelection {
+    const [lo, hi] = a.index <= b.index ? [a, b] : [b, a];
+    return { trackId: a.trackId, startIndex: lo.index, endIndex: hi.index };
+  }
+
+  function handleDragMove(event: PointerEvent) {
+    if (!dragStartSample) return;
+
+    if (!pastThreshold) {
+      if (Math.abs(event.clientX - dragStartClientX) < RANGE_DRAG_THRESHOLD_PX) {
+        // Still an ordinary press-and-trace — but only if nothing is locked
+        // in already; a locked range stays put until explicitly cleared,
+        // so a stray sub-threshold press on the chart shouldn't touch it.
+        if (!props.range()) handleMove(event);
+        return;
+      }
+      // Crossing the threshold commits this press to a fresh range,
+      // replacing anything already locked in.
+      pastThreshold = true;
+      setIsDragging(true);
+      props.setHovered(null);
+    }
+
+    const span = trackSpans().get(dragStartSample.trackId);
+    const targetM = distanceAtClientX(event.clientX);
+    const clampedM = span ? Math.max(span.minM, Math.min(span.maxM, targetM)) : targetM;
+    const endSample = sampleAtDistance(clampedM);
+    if (endSample) props.setRange(normalizeRange(dragStartSample, endSample));
+  }
+
   // Arrow keys step by 1% of the route's total distance — fine enough to feel
   // continuous, coarse enough to cross a long route in a reasonable number of
   // presses. Home/End jump to the very start/finish.
   function handleKeyDown(event: KeyboardEvent) {
+    if (event.key === "Escape" && props.range()) {
+      props.setRange(null);
+      event.preventDefault();
+      return;
+    }
+
     const list = samples();
     if (list.length === 0) return;
 
@@ -295,6 +402,31 @@ export default function ElevationProfile(props: ElevationProfileProps) {
   });
 
   const hasData = createMemo(() => samples().length > 1);
+
+  const activeRangeTrack = createMemo(() => {
+    const range = props.range();
+    if (!range) return null;
+    return props.tracks.find((t) => t.id === range.trackId) ?? null;
+  });
+
+  const activeRangeStats = createMemo(() => {
+    const range = props.range();
+    const track = activeRangeTrack();
+    if (!range || !track) return null;
+    return computeRangeStats(track, range);
+  });
+
+  /** The range's start/end in flattened chart-distance terms, for the band and its markers. */
+  const activeRangeSpan = createMemo(() => {
+    const range = props.range();
+    const track = activeRangeTrack();
+    const span = range ? trackSpans().get(range.trackId) : null;
+    if (!range || !track || !span) return null;
+    return {
+      startM: span.minM + track.distances[range.startIndex],
+      endM: span.minM + track.distances[range.endIndex],
+    };
+  });
 
   /**
    * `role="slider"` rather than `role="img"`: the profile is a 1-D position
@@ -343,24 +475,43 @@ export default function ElevationProfile(props: ElevationProfileProps) {
           tabIndex={hasData() ? 0 : undefined}
           role="slider"
           class="block h-[180px] w-full cursor-pointer sm:h-[220px]"
-          aria-label="Elevation profile. Point, drag, or use the arrow keys to trace the route on the map."
+          aria-label="Elevation profile. Point, drag, or use the arrow keys to trace the route on the map. Drag further to select a range."
           aria-valuemin={0}
           aria-valuemax={Math.round(extent().totalM)}
           aria-valuenow={Math.round(props.hovered()?.distanceM ?? 0)}
           aria-valuetext={valueText()}
           // touch-action:none is scoped to the plot so dragging here traces the
-          // route instead of scrolling, while the rest of the page scrolls
-          // normally.
+          // route (or selects a range) instead of scrolling, while the rest of
+          // the page scrolls normally.
           style={{ "touch-action": "none" }}
           onPointerDown={(event) => {
             event.currentTarget.setPointerCapture(event.pointerId);
-            handleMove(event);
+            dragStartClientX = event.clientX;
+            dragStartSample = sampleAt(event.clientX);
+            pastThreshold = false;
+            // Suspended while a range is already locked — see handleDragMove.
+            if (!props.range()) handleMove(event);
           }}
           onPointerMove={(event) => {
+            if (dragStartSample) {
+              handleDragMove(event);
+              return;
+            }
+            // No press in progress — ordinary hover. Suspended entirely while
+            // a range is locked in, so a passing mouse doesn't paint over its
+            // band/stats.
+            if (props.range()) return;
             // Only trace while a finger is down on touch; hover freely with a mouse.
             if (event.pointerType !== "touch" || event.pressure > 0) handleMove(event);
           }}
-          onPointerUp={() => props.setHovered(null)}
+          onPointerUp={() => {
+            // props.range is already live-updated by handleDragMove — releasing
+            // just ends the drag itself (which un-hides the Clear button).
+            if (!pastThreshold) props.setHovered(null);
+            setIsDragging(false);
+            dragStartSample = null;
+            pastThreshold = false;
+          }}
           onPointerLeave={() => props.setHovered(null)}
           onKeyDown={handleKeyDown}
           onBlur={() => props.setHovered(null)}
@@ -407,6 +558,22 @@ export default function ElevationProfile(props: ElevationProfileProps) {
           </For>
 
           <path d={areaPath()} fill="url(#elevation-fill)" />
+
+          {/* The selected range's band, drawn under the line so the
+              grade-coloured curve stays fully legible on top of it. */}
+          <Show when={activeRangeSpan()}>
+            {(span) => (
+              <rect
+                x={xOf(span().startM)}
+                y={PAD_TOP}
+                width={Math.max(0, xOf(span().endM) - xOf(span().startM))}
+                height={PLOT_H}
+                fill="var(--accent)"
+                fill-opacity="0.12"
+              />
+            )}
+          </Show>
+
           <For each={gradeSegments()}>
             {(segment) => (
               <path
@@ -433,6 +600,26 @@ export default function ElevationProfile(props: ElevationProfileProps) {
               </text>
             )}
           </For>
+
+          {/* The range's own start/end markers — drawn after (so on top of)
+              the grade line, echoing the single hover marker's own look. */}
+          <Show when={activeRangeSpan()}>
+            {(span) => (
+              <For each={[span().startM, span().endM]}>
+                {(distanceM) => (
+                  <line
+                    x1={xOf(distanceM)}
+                    x2={xOf(distanceM)}
+                    y1={PAD_TOP}
+                    y2={PAD_TOP + PLOT_H}
+                    stroke="var(--accent)"
+                    stroke-width="1.5"
+                    vector-effect="non-scaling-stroke"
+                  />
+                )}
+              </For>
+            )}
+          </Show>
 
           <Show when={hoveredSample()}>
             {(hover) => (
@@ -465,46 +652,94 @@ export default function ElevationProfile(props: ElevationProfileProps) {
             covers the line and never runs off the edge on a narrow screen. */}
         <figcaption class="tabular flex min-h-[2.25rem] flex-wrap items-center gap-x-5 gap-y-1 px-1 pt-1 text-sm">
           <Show
-            when={props.hovered()}
+            when={activeRangeStats()}
             fallback={
-              <span class="ink-muted text-xs">
-                Point, drag, or use the arrow keys to trace the route on the map.
-              </span>
+              <Show
+                when={props.hovered()}
+                fallback={
+                  <span class="ink-muted text-xs">
+                    Point, drag, or use the arrow keys to trace the route on the map — drag further to
+                    select a range.
+                  </span>
+                }
+              >
+                {(point) => (
+                  <>
+                    <span>
+                      <span class="ink-muted">at </span>
+                      {formatDistance(point().distanceM)}
+                    </span>
+                    <Show when={point().elevationM != null}>
+                      <span>
+                        <span class="ink-muted">elev </span>
+                        {formatElevation(point().elevationM as number)}
+                      </span>
+                    </Show>
+                    {/* `when={... != null}`, not the raw percentage — a flat 0%
+                        grade is falsy and would otherwise hide its own readout. */}
+                    <Show when={gradePercentAt(point().distanceM) != null}>
+                      <span>
+                        <span class="ink-muted">grade </span>
+                        {formatGrade(gradePercentAt(point().distanceM) as number)}
+                      </span>
+                    </Show>
+                    <Show when={point().timeOffsetS != null}>
+                      <span>
+                        <span class="ink-muted">after </span>
+                        {formatDuration(point().timeOffsetS as number)}
+                      </span>
+                    </Show>
+                    <Show when={arrivalTextAt(point().distanceM)}>
+                      {(arrival) => (
+                        <span>
+                          <span class="ink-muted">arriving </span>
+                          {arrival()}
+                        </span>
+                      )}
+                    </Show>
+                  </>
+                )}
+              </Show>
             }
           >
-            {(point) => (
+            {(stats) => (
               <>
                 <span>
-                  <span class="ink-muted">at </span>
-                  {formatDistance(point().distanceM)}
+                  <span class="ink-muted">distance </span>
+                  {formatDistance(stats().distanceM)}
                 </span>
-                <Show when={point().elevationM != null}>
+                <span>
+                  <span class="ink-muted">ascent </span>
+                  {formatElevation(stats().elevationGainM)}
+                </span>
+                <span>
+                  <span class="ink-muted">descent </span>
+                  {formatElevation(stats().elevationLossM)}
+                </span>
+                <Show when={stats().elapsedS != null}>
                   <span>
-                    <span class="ink-muted">elev </span>
-                    {formatElevation(point().elevationM as number)}
+                    <span class="ink-muted">time </span>
+                    {formatDuration(stats().elapsedS as number)}
                   </span>
                 </Show>
-                {/* `when={... != null}`, not the raw percentage — a flat 0%
-                    grade is falsy and would otherwise hide its own readout. */}
-                <Show when={gradePercentAt(point().distanceM) != null}>
+                <Show when={stats().avgSpeedMps != null}>
                   <span>
-                    <span class="ink-muted">grade </span>
-                    {formatGrade(gradePercentAt(point().distanceM) as number)}
+                    <span class="ink-muted">{prefersPace(props.activityType) ? "pace " : "avg "}</span>
+                    {prefersPace(props.activityType)
+                      ? formatPace(stats().avgSpeedMps as number)
+                      : formatSpeed(stats().avgSpeedMps as number)}
                   </span>
                 </Show>
-                <Show when={point().timeOffsetS != null}>
-                  <span>
-                    <span class="ink-muted">after </span>
-                    {formatDuration(point().timeOffsetS as number)}
-                  </span>
-                </Show>
-                <Show when={arrivalTextAt(point().distanceM)}>
-                  {(arrival) => (
-                    <span>
-                      <span class="ink-muted">arriving </span>
-                      {arrival()}
-                    </span>
-                  )}
+                {/* Only once the drag has actually locked in — clearing a
+                    still-in-progress drag makes no sense. */}
+                <Show when={props.range() && !isDragging()}>
+                  <button
+                    type="button"
+                    class="btn btn-ghost !min-h-0 px-2 py-1 text-xs"
+                    onClick={() => props.setRange(null)}
+                  >
+                    Clear
+                  </button>
                 </Show>
               </>
             )}

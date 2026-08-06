@@ -5,6 +5,7 @@ import {
   formatElevation,
   formatPace,
   formatSpeed,
+  prefersPace,
 } from "~/lib/format";
 import type { RouteStats } from "~/lib/gpx/types";
 
@@ -13,13 +14,6 @@ interface StatsGridProps {
   /** Running and hiking read better as pace; riding as speed. */
   activityType?: string | null;
   class?: string;
-}
-
-const PACE_ACTIVITIES = ["run", "running", "hike", "hiking", "walk", "walking", "trail"];
-
-function prefersPace(activityType: string | null | undefined): boolean {
-  if (!activityType) return false;
-  return PACE_ACTIVITIES.includes(activityType.trim().toLowerCase());
 }
 
 interface Tile {
