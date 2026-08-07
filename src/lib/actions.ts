@@ -116,6 +116,12 @@ export const createRouteAction = action(async (formData: FormData) => {
   }
 }, "createRoute");
 
+/** Empty string from the rating <select>'s "—" option means "clear it". */
+function wouldRedoRatingOf(formData: FormData): number | null {
+  const raw = String(formData.get("wouldRedoRating") ?? "");
+  return raw ? Number(raw) : null;
+}
+
 export const updateRouteAction = action(async (formData: FormData) => {
   "use server";
   const { requireAdmin } = await import("./auth");
@@ -129,6 +135,9 @@ export const updateRouteAction = action(async (formData: FormData) => {
       description: String(formData.get("description") ?? ""),
       activityType: String(formData.get("activityType") ?? ""),
       visibility: visibilityOf(formData),
+      storyMarkdown: String(formData.get("storyMarkdown") ?? ""),
+      conditions: String(formData.get("conditions") ?? ""),
+      wouldRedoRating: wouldRedoRatingOf(formData),
     });
   } catch (error) {
     if (error instanceof ValidationError) return error;

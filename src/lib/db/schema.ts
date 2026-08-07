@@ -53,6 +53,16 @@ export interface RoutesTable extends StatsColumns {
   bbox: string | null;
   /** Earliest track start, for sorting the gallery chronologically. */
   startedAt: number | null;
+  /**
+   * Freeform trip report, in Markdown. Rendered with `renderStory` (see
+   * `src/lib/story.ts`) — plain text in, plain text out if it holds no
+   * Markdown syntax, so existing prose never needs migrating.
+   */
+  storyMarkdown: string | null;
+  /** Freeform trail/weather conditions at the time, e.g. "muddy, overcast". */
+  conditions: string | null;
+  /** 1-5, "would I do this again?" Validated in `updateRoute`, not the schema. */
+  wouldRedoRating: number | null;
   createdAt: Generated<number>;
   updatedAt: Generated<number>;
 }
@@ -87,12 +97,9 @@ export interface TracksTable extends StatsColumns {
 /**
  * Photos attached to a route, matched to a position along the track.
  *
- * Defined ahead of the feature so the schema is already in place: the planned
- * flow is to read EXIF `DateTimeOriginal` from an upload, find the trackpoint
- * closest in time via `tracks.timeOffsets`, and store both the resolved
- * coordinates and the distance along the route. `lat`/`lon` are kept separately
- * because a photo may carry its own GPS tags, which take precedence over a
- * time-based match. Nothing reads this table yet.
+ * `lat`/`lon` are resolved from EXIF `DateTimeOriginal` by finding the
+ * trackpoint closest in time via `tracks.timeOffsets`, unless the photo
+ * carries its own GPS tags, which take precedence over a time-based match.
  */
 export interface PhotosTable {
   id: string;
@@ -144,6 +151,9 @@ export interface Route extends RouteStats {
   activityType: string | null;
   bbox: BBox | null;
   startedAt: Date | null;
+  storyMarkdown: string | null;
+  conditions: string | null;
+  wouldRedoRating: number | null;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -13,6 +13,7 @@ import StatsGrid from "~/components/StatsGrid";
 import { formatDate, formatDateISO, formatDistance, formatElevation } from "~/lib/format";
 import type { RouteStats } from "~/lib/gpx/types";
 import type { RangeSelection } from "~/lib/range-stats";
+import { renderStory } from "~/lib/story";
 import { bboxOrFallback, toPhotoView, toTrackView, type HoverPoint } from "~/lib/track-view";
 
 // MapLibre touches `window` at import time, so it must never be evaluated on the
@@ -43,6 +44,9 @@ const getRoute = query(async (slug: string) => {
     activityType: route.activityType,
     visibility: route.visibility,
     startedAt: route.startedAt?.getTime() ?? null,
+    storyMarkdown: route.storyMarkdown,
+    conditions: route.conditions,
+    wouldRedoRating: route.wouldRedoRating,
     bbox: route.bbox ?? null,
     siteName: process.env.PUBLIC_SITE_NAME ?? "gpxfolio",
     // Absolute per the OpenGraph spec — a relative og:image is undefined
@@ -314,6 +318,52 @@ export default function RoutePage() {
                       selected={selectedPhotoId}
                       onSelect={setSelectedPhotoId}
                     />
+                  </section>
+                </Show>
+
+                {/* After the photos, as a closing reflection rather than an
+                    upfront scene-setter — the conditions/would-redo facts
+                    read as retrospective judgments made once the hike, and
+                    the photos of it, are already behind you. */}
+                <Show
+                  when={
+                    route().storyMarkdown || route().conditions || route().wouldRedoRating != null
+                  }
+                >
+                  <section class="card mt-4 rounded-xl px-2 py-3 sm:px-4">
+                    <h2 class="ink-muted mb-2 px-2 text-[0.6875rem] font-semibold uppercase tracking-wider">
+                      Story
+                    </h2>
+                    <div class="px-2">
+                      <Show when={route().conditions || route().wouldRedoRating != null}>
+                        <dl class="ink-muted mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                          <Show when={route().conditions}>
+                            {(conditions) => (
+                              <div>
+                                <dt class="inline font-semibold">Conditions: </dt>
+                                <dd class="inline">{conditions()}</dd>
+                              </div>
+                            )}
+                          </Show>
+                          <Show when={route().wouldRedoRating}>
+                            {(rating) => (
+                              <div>
+                                <dt class="inline font-semibold">Would redo: </dt>
+                                <dd class="inline">{rating()}/5</dd>
+                              </div>
+                            )}
+                          </Show>
+                        </dl>
+                      </Show>
+                      <Show when={route().storyMarkdown}>
+                        {(markdown) => (
+                          <div
+                            class="prose-story text-[0.9375rem] leading-relaxed"
+                            innerHTML={renderStory(markdown())}
+                          />
+                        )}
+                      </Show>
+                    </div>
                   </section>
                 </Show>
 

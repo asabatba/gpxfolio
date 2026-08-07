@@ -14,6 +14,7 @@ import Breadcrumbs from "~/components/Breadcrumbs";
 import ConfirmDialog, { type PendingConfirm } from "~/components/ConfirmDialog";
 import MapSkeleton from "~/components/MapSkeleton";
 import SiteHeader from "~/components/SiteHeader";
+import StoryField from "~/components/StoryField";
 import UploadDropzone from "~/components/UploadDropzone";
 import UploadMapPreview from "~/components/UploadMapPreview";
 import UploadProgress from "~/components/UploadProgress";
@@ -69,6 +70,9 @@ const getRouteForEdit = query(async (id: string) => {
     description: route.description ?? "",
     activityType: route.activityType ?? "",
     visibility: route.visibility,
+    storyMarkdown: route.storyMarkdown ?? "",
+    conditions: route.conditions ?? "",
+    wouldRedoRating: route.wouldRedoRating,
     distanceM: route.distanceM,
     elevationGainM: route.elevationGainM,
     tracks: route.tracks.map((track) => ({
@@ -298,6 +302,41 @@ export default function EditRoute() {
                 <p class="ink-muted text-xs">
                   Link stays <code>/r/{route().slug}</code> even if you rename the route.
                 </p>
+
+                <div class="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label class="label" for="conditions">
+                      Conditions
+                    </label>
+                    <input
+                      id="conditions"
+                      name="conditions"
+                      class="field"
+                      value={route().conditions}
+                      placeholder="e.g. muddy, overcast, snow near the summit"
+                      maxlength="300"
+                    />
+                  </div>
+                  <div>
+                    <label class="label" for="wouldRedoRating">
+                      Would redo?
+                    </label>
+                    <select id="wouldRedoRating" name="wouldRedoRating" class="field">
+                      <option value="" selected={route().wouldRedoRating == null}>
+                        —
+                      </option>
+                      <For each={[1, 2, 3, 4, 5]}>
+                        {(n) => (
+                          <option value={n} selected={route().wouldRedoRating === n}>
+                            {n} {n === 1 ? "(no)" : n === 5 ? "(absolutely)" : ""}
+                          </option>
+                        )}
+                      </For>
+                    </select>
+                  </div>
+                </div>
+
+                <StoryField id="storyMarkdown" name="storyMarkdown" initialValue={route().storyMarkdown} />
 
                 <Show when={updateSubmission.result instanceof Error}>
                   <p role="alert" class="text-sm" style={{ color: "#e03131" }}>

@@ -178,6 +178,11 @@ export async function createRoute(input: CreateRouteInput): Promise<IngestResult
           description: input.description?.trim() || null,
           visibility: input.visibility,
           activityType: input.activityType?.trim() || null,
+          // A freshly created route has no trip story yet — the admin adds
+          // one later from the edit page, same as photos.
+          storyMarkdown: null,
+          conditions: null,
+          wouldRedoRating: null,
           bbox: rollup.bbox,
           startedAt: rollup.startedAt,
           createdAt: now,
@@ -336,6 +341,10 @@ export interface UpdateRouteInput {
   description?: string | null;
   visibility?: Visibility;
   activityType?: string | null;
+  storyMarkdown?: string | null;
+  conditions?: string | null;
+  /** 1-5, or `null`/`undefined` to clear it. */
+  wouldRedoRating?: number | null;
 }
 
 /**
@@ -353,6 +362,14 @@ export async function updateRoute(routeId: string, input: UpdateRouteInput): Pro
   if (input.description !== undefined) patch.description = input.description?.trim() || null;
   if (input.visibility !== undefined) patch.visibility = input.visibility;
   if (input.activityType !== undefined) patch.activityType = input.activityType?.trim() || null;
+  if (input.storyMarkdown !== undefined) patch.storyMarkdown = input.storyMarkdown?.trim() || null;
+  if (input.conditions !== undefined) patch.conditions = input.conditions?.trim() || null;
+  if (input.wouldRedoRating !== undefined) {
+    if (input.wouldRedoRating !== null && (input.wouldRedoRating < 1 || input.wouldRedoRating > 5)) {
+      throw new ValidationError("Would-redo rating must be between 1 and 5.");
+    }
+    patch.wouldRedoRating = input.wouldRedoRating;
+  }
 
   await db.updateTable("routes").set(patch).where("id", "=", routeId).execute();
 }

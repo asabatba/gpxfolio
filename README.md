@@ -18,7 +18,7 @@ file, and an interactive elevation profile linked to the map.
 ## Stack
 
 SolidStart (SSR, Node preset) · TypeScript · Tailwind CSS v4 · MapLibre GL v6 ·
-SQLite via Kysely · Vitest. Distances are metric throughout.
+SQLite via Kysely · `markdown-it` · Vitest. Distances are metric throughout.
 
 ### Database
 
@@ -291,3 +291,22 @@ time-matched track point (which should).
 Photos show as a gallery on the route page and as pins on the map (hand-built
 MapLibre `Marker`s, like the existing start/finish endpoints — no plugin);
 clicking a pin opens the gallery to that photo.
+
+## Trip story
+
+A route can carry a freeform write-up plus two small structured facts —
+conditions and a 1-5 "would I do this again?" rating — edited from the route's
+edit page and shown as a Story section after the photo gallery on the public
+page. The story is not woven into the map/elevation profile the way photos
+are: it's Markdown (`src/lib/story.ts`, rendered with `markdown-it`), not
+positional data, so it's just a block of text next to whatever photos already
+exist, not synced to a point along the track.
+
+`html: false` (markdown-it's default) means raw `<tag>`s typed into the field
+are escaped rather than rendered — the admin is the only author, but the
+output is public, so there's no reason to open an HTML-injection surface for a
+feature that doesn't need one. `breaks: true` turns a single Enter into a line
+break, since CommonMark's blank-line-between-paragraphs rule is a foot-gun for
+someone typing prose, not Markdown. The edit page's `StoryField` renders the
+same function client-side for a toggleable preview, so what you see before
+saving is what visitors see after.

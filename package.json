@@ -26,6 +26,7 @@
     "fast-xml-parser": "^5.10.1",
     "kysely": "^0.29.4",
     "maplibre-gl": "^6.1.0",
+    "markdown-it": "^15.0.0",
     "sharp": "^0.35.3",
     "solid-js": "^1.9.14",
     "tz-lookup": "^6.1.25",
